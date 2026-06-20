@@ -123,7 +123,7 @@ const APClaim = {
                     bestCandidate = candidate;
                 }
             } catch (e) {
-                console.warn("[Claim] ⚠️ 评分失败: " + candidate.name, e.message);
+                console.log("[Claim] WARN: 评分失败: " + candidate.name, e.message);
             }
         }
 

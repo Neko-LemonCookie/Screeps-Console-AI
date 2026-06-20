@@ -46,7 +46,7 @@ var APWasmLoader = {
             // Screeps: require(Binary模块名) 返回 ArrayBuffer
             var binBuffer = require(name);
             if (!binBuffer || !(binBuffer instanceof ArrayBuffer)) {
-                console.warn('[WasmLoader] ' + name + ': require未返回ArrayBuffer');
+                console.log('[WasmLoader] WARN: ' + name + ': require未返回ArrayBuffer');
                 return null;
             }
 
@@ -62,7 +62,7 @@ var APWasmLoader = {
             console.log('[WasmLoader] ' + name + ': OK (' + binBuffer.byteLength + ' bytes)');
             return inst.exports;
         } catch (e) {
-            console.warn('[WasmLoader] ' + name + ' 加载失败: ' + (e.message || e));
+            console.log('[WasmLoader] ERROR: ' + name + ' 加载失败: ' + (e.message || e));
             return null;
         }
     },

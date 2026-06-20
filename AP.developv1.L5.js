@@ -26,7 +26,7 @@ const DevelopV1_L5 = {
             this._publishCreepNeeds(room, state);
             this._manageResources(room, state);
             this._checkMilestone(room, state);
-        } catch (e) { console.error("[DevelopV1-L5] ❌:", e.message); }
+        } catch (e) { console.log("[DevelopV1-L5] ERROR:", e.message); }
     },
 
     analyze: function(room) {

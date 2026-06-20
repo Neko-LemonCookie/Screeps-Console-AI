@@ -22,7 +22,7 @@ const DevelopV1_Max = {
             this._publishCreepNeeds(room, state);
             this._optimizeEconomy(room, state);
             this._evaluateExpansion(room, state);
-        } catch (e) { console.error("[DevelopV1-Max] ❌:", e.message); }
+        } catch (e) { console.log("[DevelopV1-Max] ERROR:", e.message); }
     },
 
     analyze: function(room) {

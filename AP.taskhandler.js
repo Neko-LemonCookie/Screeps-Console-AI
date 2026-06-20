@@ -79,7 +79,7 @@ const APTaskhandler = {
                         break;
                         
                     default:
-                        console.warn("[TaskHandler] ⚠️ 未知的Strategy任务类型: " + task.type);
+                        console.log("[TaskHandler] WARN: 未知的Strategy任务类型: " + task.type);
                 }
                 
                 // 标记为已处理

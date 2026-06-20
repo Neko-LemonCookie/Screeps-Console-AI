@@ -19,7 +19,7 @@ function getStrategy(rcl) {
         const strategyPath = strategyMap[rcl];
         if (strategyPath) {
             try { strategyCache[key] = require(strategyPath); }
-            catch (e) { console.error("[DevelopV1] ❌ 加载失败: " + strategyPath, e); strategyCache[key] = null; }
+            catch (e) { console.log("[DevelopV1] ERROR: 加载失败: " + strategyPath, e); strategyCache[key] = null; }
         } else { strategyCache[key] = null; }
     }
     return strategyCache[key];
@@ -35,7 +35,7 @@ const DevelopV1 = {
             const strategy = getStrategy(rcl);
             if (strategy?.run) {
                 try { strategy.run(room); }
-                catch (e) { console.error("[DevelopV1] ❌ 执行错误 (" + roomName + " RCL" + rcl + "):", e.message); }
+                catch (e) { console.log("[DevelopV1] ERROR: 执行错误 (" + roomName + " RCL" + rcl + "):", e.message); }
             }
         }
     },

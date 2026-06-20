@@ -17,7 +17,7 @@ function getStrategy(rcl) {
         const path = strategyMap[rcl];
         if (path) {
             try { strategyCache[key] = require(path); }
-            catch (e) { console.error("[DevelopV2] ❌:", e); strategyCache[key] = null; }
+            catch (e) { console.log("[DevelopV2] ERROR:", e); strategyCache[key] = null; }
         } else { strategyCache[key] = null; }
     }
     return strategyCache[key];
@@ -29,7 +29,7 @@ const DevelopV2 = {
             const room = Game.rooms[rn];
             if (!room.controller?.my || room.memory.layoutType !== '5x5') continue;
             const s = getStrategy(room.controller.level);
-            if (s?.run) { try { s.run(room); } catch (e) { console.error("[DevelopV2] ❌:", e.message); } }
+            if (s?.run) { try { s.run(room); } catch (e) { console.log("[DevelopV2] ERROR:", e.message); } }
         }
     },
     clearCache: function() { for (const k in strategyCache) delete strategyCache[k]; }

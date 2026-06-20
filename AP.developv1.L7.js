@@ -22,7 +22,7 @@ const DevelopV1_L7 = {
             if (!this._shouldRefresh(room)) return;
             this._publishCreepNeeds(room, state);
             this._checkMilestone(room, state);
-        } catch (e) { console.error("[DevelopV1-L7] ❌:", e.message); }
+        } catch (e) { console.log("[DevelopV1-L7] ERROR:", e.message); }
     },
 
     analyze: function(room) {
