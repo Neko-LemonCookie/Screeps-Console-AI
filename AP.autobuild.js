@@ -107,7 +107,8 @@ const APAutobuild = {
                 }
             }
         }
-    }
+    },
+
     /**
      * RCL 5+: 将Source旁的Container逐步替换为Link传输对
      * 流程：拆Container → 在原位建源端Link → 靠近Storage建接收端Link → 注册传输对
@@ -197,7 +198,7 @@ const APAutobuild = {
                     if (distToSourceLink <= 10 && distToStorage < bestStorageDist) {
                         // 检查该位置是否可以建造（没有地形障碍和其他建筑）
                         var terrain = room.lookForAt(LOOK_TERRAIN, testX, testY);
-                        if (terrain[0] !== 'wall') {
+                        if (terrain[0] !== 'wall' && terrain.length > 0) {
                             var structures = testPos.lookFor(LOOK_STRUCTURES);
                             if (structures.length === 0) {
                                 var sites = testPos.lookFor(LOOK_CONSTRUCTION_SITES);

@@ -11,6 +11,7 @@ const APFight = {
     THREAT_LEVELS: { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 },
 
     CONFIG: {
+        ENABLED: false,  // 赛季服侦察Creep太多，前期关闭防御响应
         ENEMY_THRESHOLDS: { MEDIUM: 1, HIGH: 3, CRITICAL: 5 },
         DEFENDER_COUNT: { MEDIUM: 2, HIGH: 4, CRITICAL: 6 },
         EMERGENCY_MODE_DURATION: 1000,
@@ -18,6 +19,8 @@ const APFight = {
     },
 
     run: function() {
+        if (!this.CONFIG.ENABLED) return;  // 防御模块已关闭
+
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName];
             if (!room.controller || !room.controller.my) continue;
@@ -84,7 +87,7 @@ const APFight = {
         const importantTypes = [STRUCTURE_WALL, STRUCTURE_RAMPART, STRUCTURE_SPAWN, STRUCTURE_STORAGE, STRUCTURE_TERMINAL];
 
         for (const s of nearbyStructures) {
-            if (importantTypes.includes(s.structureType)) {
+            if (importantTypes.indexOf(s.structureType) !== -1) {
                 if (enemy.getActiveBodyparts(ATTACK).length > 0 ||
                     enemy.getActiveBodyparts(RANGED_ATTACK).length > 0 ||
                     enemy.getActiveBodyparts(WORK).length > 0) {

@@ -1,18 +1,16 @@
 /**
  * build.js
  *
- * 一键打包脚本：扁平化到 dist/ 根目录（Screeps Side Module 要求）
+ * 一键打包脚本：扁平化到 dist/ 根目录（Screeps CommonJS 要求）
  *
  * Screeps 的 require() 只支持扁平命名空间，不支持子目录路径：
  *   require('lib.AP.taskboard')     ✅ 扁平名称OK
- *   require('calculate_claim')      ✅ Binary WASM 模块也OK！
- *   require('wasm/calc.js')         ❌ 带路径会报错
+ *   require('js-adapters/calc.js')  ❌ 带路径会报错
  *
  * 本脚本自动完成：
  *   1. 复制所有JS运行时文件到 dist/
- *   2. 复制WASM二进制文件（.wasm）作为Binary模块
- *   3. 扁平化：子目录文件重命名（加前缀防冲突）
- *   4. 替换所有 require() 路径为扁平名称
+ *   2. 扁平化：子目录文件重命名（加前缀防冲突）
+ *   3. 替换所有 require() 路径为扁平名称
  *
  * 用法：node build.js
  */
@@ -60,7 +58,6 @@ const FILE_MAP = [
     ['lib.AP.tempbuild.js',                        'lib.AP.tempbuild.js'],
     ['lib.AP.calculate_claim.js',                  'lib.AP.calculate_claim.js'],
     ['lib.AP.taskHelper.js',                       'lib.AP.taskHelper.js'],
-    ['lib.AP.wasm_loader.js',                      'lib.AP.wasm_loader.js'],
 
     // === 建筑模块 ===
     ['building.spawn.js',                          'building.spawn.js'],
@@ -97,18 +94,6 @@ const FILE_MAP = [
 
     // === 用户工具 ===
     ['User.tasksender.js',                        'User.tasksender.js'],
-
-    // ============================================================
-    // ★★★ WASM 二进制模块（Side Module，直接require加载）★★★
-    // Screeps 原生支持：require('name') 返回 ArrayBuffer
-    // 然后用 WebAssembly.Module(buf) + Instance(mod, {}) 加载
-    // ============================================================
-    ['wasm-crates/target/wasm32-unknown-unknown/release/screeps_wasm_calculate_claim.wasm',
-                                                'calculate_claim.wasm'],
-    ['wasm-crates/target/wasm32-unknown-unknown/release/screeps_wasm_spawncreep.wasm',
-                                                'spawncreep.wasm'],
-    ['wasm-crates/target/wasm32-unknown-unknown/release/screeps_wasm_tempbuild.wasm',
-                                                'tempbuild.wasm'],
 ];
 
 // ============================================================
@@ -141,8 +126,8 @@ function replaceRequires(content) {
 // ============================================================
 
 console.log('========================================');
-console.log('  Screeps AI Build Script (Side Module)');
-console.log('  Output: dist/ (flat, JS + .wasm Binary)');
+console.log('  Screeps AI Build Script');
+console.log('  Output: dist/ (flat, JS only)');
 console.log('========================================');
 console.log('');
 
@@ -153,7 +138,6 @@ console.log('[1/3] 清理旧输出... OK');
 var missing = 0;
 var copied = 0;
 var replaced = 0;
-var wasmTotalSize = 0;
 
 console.log('\n[2/3] 复制文件...');
 for (var i = 0; i < FILE_MAP.length; i++) {
@@ -169,34 +153,22 @@ for (var i = 0; i < FILE_MAP.length; i++) {
     var srcFull = path.join(ROOT, srcPath);
     var dstFull = path.join(DIST, dstName);
 
-    // 区分二进制和文本文件
-    var isWasm = dstName.endsWith('.wasm');
-
-    if (isWasm) {
-        // 二进制文件直接复制（不修改）
-        fs.copyFileSync(srcFull, dstFull);
-        var sz = fs.statSync(dstFull).size;
-        wasmTotalSize += sz;
-        console.log('  [WASM] ' + dstName + ' (' + Math.round(sz / 1024) + 'KB)');
-    } else {
-        // JS文件：读取 → 替换require路径 → 写入
-        var content = fs.readFileSync(srcFull, 'utf8');
-        var newContent = replaceRequires(content);
-        if (newContent !== content) replaced++;
-        fs.writeFileSync(dstFull, newContent, 'utf8');
-    }
+    // JS文件：读取 → 替换require路径 → 写入
+    var content = fs.readFileSync(srcFull, 'utf8');
+    var newContent = replaceRequires(content);
+    if (newContent !== content) replaced++;
+    fs.writeFileSync(dstFull, newContent, 'utf8');
 
     copied++;
 }
 
 // 统计
 console.log('\n[3/3] 打包完成!');
-console.log('  JS文件: ' + (copied - countWasm()) + ' 个');
-console.log('  WASM文件: ' + countWasm() + ' 个 (' + Math.round(wasmTotalSize / 1024) + 'KB)');
+console.log('  JS文件: ' + copied + ' 个');
 console.log('  路径替换: ' + replaced + ' 个JS文件');
 
 if (missing > 0) {
-    console.error('  缺失: ' + missing + ' ← 需要先: cd wasm-crates && cargo build --target wasm32-unknown-unknown --release');
+    console.error('  缺失: ' + missing + ' 个文件');
 } else {
     console.log('  缺失: 0 (完整)');
 }
@@ -214,25 +186,14 @@ console.log('  目录层数: 1 (全部扁平)\n');
 console.log('  文件清单:');
 files.sort().forEach(function(f) {
     var sz = fs.statSync(path.join(DIST, f)).size;
-    var tag = f.endsWith('.wasm') ? '[BIN]' : '     ';
-    console.log('    ' + tag + ' ' + f + ' (' + Math.round(sz / 1024) + 'KB)');
+    console.log('    ' + f + ' (' + Math.round(sz / 1024) + 'KB)');
 });
 
 console.log('\n使用方法:');
-console.log('  1. 复制 dist/* 到游戏脚本文件夹（全部同一级目录）');
-console.log('  2. .wasm 文件在游戏中上传为 Binary 模块类型');
-console.log('  3. JS代码通过 require("modulename") 自动获取WASM字节\n');
+console.log('  复制 dist/* 到游戏脚本文件夹（全部同一级目录）\n');
 
 if (missing > 0) {
     process.exit(1);
 } else {
     console.log('  ✓ 全部就绪！');
-}
-
-function countWasm() {
-    var c = 0;
-    for (var i = 0; i < FILE_MAP.length; i++) {
-        if (FILE_MAP[i][1].endsWith('.wasm')) c++;
-    }
-    return c;
 }

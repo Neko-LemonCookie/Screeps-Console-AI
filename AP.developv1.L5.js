@@ -61,7 +61,7 @@ const DevelopV1_L5 = {
         const curCommon = (state.creeps.CommonI || 0);
         if (curCommon < this.CONFIG.CREEP_CONFIG.CommonI.minCount) {
             taskboard.strategy.needCreeps(room.name, {
-                model: 'CommonI', count: Math.min(this.CONFIG.CREEP_CONFIG.CommonI.minCount - curCommon, 2),
+                model: 'CommonI', count: this.CONFIG.CREEP_CONFIG.CommonI.minCount - curCommon,
                 priority: 'harvest', data: { bodySize: this.CONFIG.CREEP_CONFIG.CommonI.bodySize }
             });
         }

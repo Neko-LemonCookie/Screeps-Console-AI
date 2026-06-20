@@ -44,7 +44,7 @@ const DevelopV1_L3 = {
         const current = state.commonICount;
         if (current < config.minCount) {
             taskboard.strategy.needCreeps(room.name, {
-                model: 'CommonI', count: Math.min(config.minCount - current, 2),
+                model: 'CommonI', count: config.minCount - current,
                 priority: 'harvest', data: { bodySize: config.bodySize, urgent: current < 2 }
             });
         } else if (current < config.maxCount && state.constructionSites > 3) {

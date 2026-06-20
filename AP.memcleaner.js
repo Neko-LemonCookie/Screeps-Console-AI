@@ -16,6 +16,7 @@ const APMemcleaner = {
         // 2. 清理失效内存
         this._cleanDeadCreeps();
         this._syncTaskboard();
+        this._cleanStaleTasks();  // 清理过期/卡死的任务，防止内存膨胀
 
         // 3. 重建缺失的 creep 内存
         this._rebuildCreepMemory();
@@ -69,10 +70,68 @@ const APMemcleaner = {
             for (const roomName in roomTasks) {
                 const tasks = roomTasks[roomName];
                 if (!Array.isArray(tasks)) continue;
-                for (const task of tasks) {
-                    if (task.takenBy && !Game.creeps[task.takenBy]) {
-                        task.takenBy = null;
+                for (var i = 0; i < tasks.length; i++) {
+                    if (tasks[i].takenBy && !Game.creeps[tasks[i].takenBy]) {
+                        tasks[i].takenBy = null;
                     }
+                }
+            }
+        }
+    },
+
+    /**
+     * 清理过期/卡死任务
+     * @private
+     */
+    _cleanStaleTasks: function() {
+        if (!Memory.Taskboard || !Memory.Taskboard.Task) return;
+        var MAX_AGE = 500;  // spawn/need_creeps过期时间
+        var CREEP_TASK_MAX_AGE = 1000;  // Creep任务超长过期（防止死锁泄漏）
+        var now = Game.time;
+
+        for (var category in Memory.Taskboard.Task) {
+            var roomTasks = Memory.Taskboard.Task[category];
+            if (!roomTasks) continue;
+            for (var roomName in roomTasks) {
+                var tasks = roomTasks[roomName];
+                if (!Array.isArray(tasks)) continue;
+
+                roomTasks[roomName] = tasks.filter(function(t) {
+                    // spawn和need_creeps类型：严格500tick过期
+                    if (t.type === 'spawn' || t.type === 'need_creeps') {
+                        return (now - t.createdTime) < MAX_AGE;
+                    }
+                    // Creeps类别：检查takenBy指向的creep是否还存在 + 超长过期
+                    if (category === 'Creeps') {
+                        if (t.takenBy && !Game.creeps[t.takenBy]) return false;  // 死creep的任务释放
+                        if (t.createdTime && (now - t.createdTime) > CREEP_TASK_MAX_AGE) return false;
+                    }
+                    return true;
+                });
+            }
+        }
+
+        // 清理不可见房间的残留内存（防止内存膨胀）
+        this._cleanInvisibleRoomMemory();
+    },
+
+    /**
+     * 清理不可见房间的残留Taskboard内存
+     * @private
+     */
+    _cleanInvisibleRoomMemory: function() {
+        if (!Memory.Taskboard || !Memory.Taskboard.Task) return;
+        for (var category in Memory.Taskboard.Task) {
+            var roomTasks = Memory.Taskboard.Task[category];
+            if (!roomTasks) continue;
+            for (var roomName in roomTasks) {
+                // 如果房间不在视野内且没有该房间名下的活跃creep，清理其任务数据
+                var hasCreepInRoom = false;
+                for (var creepName in Game.creeps) {
+                    if (Game.creeps[creepName].room.name === roomName) { hasCreepInRoom = true; break; }
+                }
+                if (!Game.rooms[roomName] && !hasCreepInRoom) {
+                    delete roomTasks[roomName];
                 }
             }
         }

@@ -16,6 +16,7 @@ const buildingSpawn = {
         if (spawn.spawning) return;
 
         const roomName = spawn.room.name;
+        const rcl = spawn.room.controller ? spawn.room.controller.level : 0;
         
         // 获取该房间的所有 Buildings 任务
         if (!Memory.Taskboard || !Memory.Taskboard.Task || !Memory.Taskboard.Task.Buildings || !Memory.Taskboard.Task.Buildings[roomName]) {
@@ -42,10 +43,25 @@ const buildingSpawn = {
             if (task.type !== 'spawn' || task.takenBy) continue;
             
             const model = task.data.model;
-            const requiredEnergy = task.data.energy;
+        // 3. 用固定模板能量值判断，不够就跳过（不传动态值）
+        const adapter = require('adapter.wasm_spawncreep');
+        var requiredEnergy = task.data.energy;
+        if (!requiredEnergy || typeof requiredEnergy !== 'number') {
+            // 没有固定能量值时从模板获取
+            switch (model) {
+                case 'CommonI': requiredEnergy = adapter.calcBodyCost(adapter.getCommonIBody(9999)); break;
+                case 'CarrierI': requiredEnergy = adapter.calcBodyCost(adapter.getCarrierIBody(9999)); break;
+                case 'AttackerI': requiredEnergy = adapter.calcBodyCost(adapter.getAttackerIBody(9999)); break;
+                case 'ClaimerI': requiredEnergy = adapter.calcBodyCost(adapter.getClaimerIBody(9999)); break;
+                default: requiredEnergy = 200; break;
+            }
+        }
+        if (!requiredEnergy) requiredEnergy = 200;
 
-            // 3. 检查房间内当前可用能量是否足够
-            if (spawn.room.energyAvailable < requiredEnergy) continue;
+        // RCL3以下禁止生成AttackerI
+        if (model === 'AttackerI' && rcl < 4) continue;
+
+        if (spawn.room.energyAvailable < requiredEnergy) continue;
 
             const pIndex = priority.indexOf(model);
             const currentPriority = pIndex === -1 ? 99 : pIndex;
@@ -68,15 +84,19 @@ const buildingSpawn = {
             // 在生成前先标记，避免多 spawn 时造成重复生成
             bestTask.takenBy = spawn.name;
 
-            const result = spawncreep.spawn(spawn, bestTask.data.model, bestTask.data.energy);
+            const spawnEnergy = requiredEnergy;  // 始终用固定模板值，不用动态room energy
+            const result = spawncreep.spawn(spawn, bestTask.data.model, spawnEnergy);
 
             if (result === OK) {
                 // 5. 生成后在内存中删除该任务（使用 takenBy 精准删除，避免索引漂移）
                 taskboard.removeTask(roomName, 'Buildings', spawn.name);
             } else {
-                // 如果生成失败，重置标记并输出错误信息
+                // 如果生成失败，重置标记
                 bestTask.takenBy = null;
-                console.log("[Spawn] ❌ 生成失败: " + result + " (Creep: " + bestTask.data.model + ", 能量: " + bestTask.data.energy + ", 可用: " + spawn.room.energyAvailable + ")");
+                // 只记录非-6（能量不足）的错误，-6是正常等待
+                if (result !== -6 && Game.time % 50 === 0) {
+                    console.log("[Spawn] ❌ 生成失败: " + result + " (" + bestTask.data.model + ")");
+                }
             }
         }
     }

@@ -55,7 +55,7 @@ module.exports = {
                 // 3.2 关键物流维护：优先保护会衰败的容器、道路和存储
                 const criticalLogistics = tower.pos.findClosestByRange(FIND_STRUCTURES, {
                     filter: (s) => {
-                        if ([STRUCTURE_CONTAINER, STRUCTURE_ROAD, STRUCTURE_STORAGE].includes(s.structureType)) {
+                        if ([STRUCTURE_CONTAINER, STRUCTURE_ROAD, STRUCTURE_STORAGE].indexOf(s.structureType) !== -1) {
                             // Storage 低于 90%
                             if (s.structureType === STRUCTURE_STORAGE) return s.hits < s.hitsMax * 0.9;
                             // 容器和道路低于 70%

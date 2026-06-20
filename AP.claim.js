@@ -232,7 +232,7 @@ const APClaim = {
 
     _countMyRooms: function() {
         let c = 0;
-        for (const rn in Game.rooms) { if (Game.rooms[rn].controller?.my) c++; }
+        for (const rn in Game.rooms) { if (Game.rooms[rn].controller && Game.rooms[rn].controller.my) c++; }
         return c;
     }
 };

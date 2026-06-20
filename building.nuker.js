@@ -32,7 +32,7 @@ module.exports = {
 
             for (const item of unclaimedTasks) {
                 // 检查资源充足性 (5000 GHO2 + 300,000 Energy)
-                const hasGHO2 = nuker.store[RESOURCE_GHODIUM] >= 5000;
+                const hasGHO2 = nuker.store[RESOURCE_GHODIUM_OXIDE] >= 5000;
                 const hasEnergy = nuker.store[RESOURCE_ENERGY] >= 300000;
                 
                 if (hasGHO2 && hasEnergy) {

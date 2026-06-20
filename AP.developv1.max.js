@@ -93,7 +93,7 @@ const DevelopV1_Max = {
         return counts;
     },
 
-    _countMyRooms: function() { let c = 0; for (const rn in Game.rooms) { if (Game.rooms[rn].controller?.my) c++; } return c; }
+    _countMyRooms: function() { let c = 0; for (const rn in Game.rooms) { if (Game.rooms[rn].controller && Game.rooms[rn].controller.my) c++; } return c; }
 };
 
 module.exports = DevelopV1_Max;

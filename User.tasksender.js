@@ -25,7 +25,7 @@ const UserTasksender = {
             'claimupgrade', 'claimbuild', 'globalcarry', 'boost'
         ];
 
-        if (!validTypes.includes(taskType)) {
+        if (validTypes.indexOf(taskType) === -1) {
             console.log("[UserTasksender] ❌ 无效的任务类型: " + taskType);
             console.log("有效类型: " + validTypes.join(', '));
             return;
@@ -96,7 +96,7 @@ const UserTasksender = {
             'automarket', 'nukeattack', 'spawn', 'linktransport', 'boost'
         ];
 
-        if (!validTypes.includes(taskType)) {
+        if (validTypes.indexOf(taskType) === -1) {
             console.log("[UserTasksender] ❌ 无效的任务类型: " + taskType);
             console.log("有效类型: " + validTypes.join(', '));
             return;

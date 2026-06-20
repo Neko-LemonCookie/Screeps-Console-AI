@@ -180,7 +180,7 @@ const taskAttack = {
         });
 
         const enemyStructures = room.find(FIND_HOSTILE_STRUCTURES, {
-            filter: (s) => [STRUCTURE_SPAWN, STRUCTURE_TOWER, STRUCTURE_EXTENSION].includes(s.structureType)
+            filter: (s) => [STRUCTURE_SPAWN, STRUCTURE_TOWER, STRUCTURE_EXTENSION].indexOf(s.structureType) !== -1
         });
         
         const criticalWalls = [];

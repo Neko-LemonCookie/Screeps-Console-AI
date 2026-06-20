@@ -27,9 +27,9 @@ const DevelopV2 = {
     run: function() {
         for (const rn in Game.rooms) {
             const room = Game.rooms[rn];
-            if (!room.controller?.my || room.memory.layoutType !== '5x5') continue;
+            if (!room.controller || !room.controller.my || room.memory.layoutType !== '5x5') continue;
             const s = getStrategy(room.controller.level);
-            if (s?.run) { try { s.run(room); } catch (e) { console.log("[DevelopV2] ERROR:", e.message); } }
+            if (s && s.run) { try { s.run(room); } catch (e) { console.log("[DevelopV2] ERROR:", e.message); } }
         }
     },
     clearCache: function() { for (const k in strategyCache) delete strategyCache[k]; }

@@ -29,11 +29,11 @@ const DevelopV1 = {
     run: function() {
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName];
-            if (!room.controller?.my) continue;
+            if (!room.controller || !room.controller.my) continue;
             if (room.memory.layoutType !== '9x9') continue;
             const rcl = room.controller.level;
             const strategy = getStrategy(rcl);
-            if (strategy?.run) {
+            if (strategy && strategy.run) {
                 try { strategy.run(room); }
                 catch (e) { console.log("[DevelopV1] ERROR: 执行错误 (" + roomName + " RCL" + rcl + "):", e.message); }
             }

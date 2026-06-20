@@ -60,7 +60,7 @@ const DevelopV1_L7 = {
         const curCarrier = (state.creeps.CarrierI || 0);
         if (curCarrier < carrierCfg.minCount && state.storageEnergy > 20000) {
             taskboard.strategy.needCreeps(room.name, {
-                model: 'CarrierI', count: Math.min(carrierCfg.minCount - curCarrier, 2), priority: 'carry',
+                model: 'CarrierI', count: carrierCfg.minCount - curCarrier, priority: 'carry',
                 data: { bodySize: carrierCfg.bodySize, enableBoost: carrierCfg.enableBoost, boostResource: carrierCfg.boostResource }
             });
         }

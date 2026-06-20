@@ -527,7 +527,7 @@ const libAPTempbuild = {
                     var costs = new PathFinder.CostMatrix();
                     room.find(FIND_STRUCTURES).forEach(function(s) {
                         if (s.structureType === STRUCTURE_ROAD) costs.set(s.pos.x, s.pos.y, 1);
-                        else if (s.structureType !== STRUCTURE_RAMPART && (OBSTACLE_OBJECT_TYPES.includes(s.structureType) || s.structureType === STRUCTURE_WALL)) {
+                        else if (s.structureType !== STRUCTURE_RAMPART && (OBSTACLE_OBJECT_TYPES.indexOf(s.structureType) !== -1 || s.structureType === STRUCTURE_WALL)) {
                             costs.set(s.pos.x, s.pos.y, 0xff);
                         }
                     });

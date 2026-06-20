@@ -37,7 +37,7 @@ const buildingTerminal = {
                 const taskType = task.type;
                 
                 // 只处理终端相关的任务类型
-                if (!priority.includes(taskType)) continue;
+                if (priority.indexOf(taskType) === -1) continue;
                 
                 // 检查是否已被其他终端领取
                 if (task.takenBy && task.takenBy !== terminal.id) continue;

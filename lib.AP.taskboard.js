@@ -21,18 +21,36 @@ const libAPTaskboard = {
      */
     _addTask: function(category, roomName, type, data) {
         this._ensureRoom(category, roomName);
-        // 为了支持多个同类型任务且支持优先级排序，使用数组存储
         if (!Array.isArray(Memory.Taskboard.Task[category][roomName])) {
             Memory.Taskboard.Task[category][roomName] = [];
         }
-        
+
+        // 去重：仅对 Buildings/Strategy 类别生效
+        // Creeps 任务是流式的，需要多个同名任务供不同 creep 领取，不能去重
+        if (category !== 'Creeps') {
+            var existing = Memory.Taskboard.Task[category][roomName];
+            var isDupe = false;
+            for (var i = 0; i < existing.length; i++) {
+                if (existing[i].type === type) {
+                    // 有 model 字段时按 type+model 去重
+                    if (existing[i].data && data && existing[i].data.model && data.model) {
+                        if (existing[i].data.model === data.model) { isDupe = true; break; }
+                    } else if (!existing[i].data.model && !data.model) {
+                        // 无 model 字段时按 type 去重（防止同类多实例被误杀）
+                        isDupe = true;
+                        break;
+                    }
+                }
+            }
+            if (isDupe) return;
+        }
+
         Memory.Taskboard.Task[category][roomName].push({
             type: type,
             data: data,
             createdTime: Game.time,
-            takenBy: null // 标记任务是否已被领取
+            takenBy: null
         });
-        // console.log("[Taskboard] ✅ " + category + " 任务创建成功: " + type + " 在房间 " + roomName);
     },
 
     /**
@@ -320,7 +338,7 @@ const libAPTaskboard = {
             });
         },
         cleanExpired: function(roomName, maxAge) {
-            if (!Memory.Taskboard?.Task?.Strategy?.[roomName]) return;
+            if (!Memory.Taskboard || !Memory.Taskboard.Task || !Memory.Taskboard.Task.Strategy || !Memory.Taskboard.Task.Strategy[roomName]) return;
             const now = Game.time;
             Memory.Taskboard.Task.Strategy[roomName] = Memory.Taskboard.Task.Strategy[roomName]
                 .filter(task => (now - task.createdTime) < maxAge);

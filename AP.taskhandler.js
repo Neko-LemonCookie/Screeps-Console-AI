@@ -49,7 +49,7 @@ const APTaskhandler = {
      * @private
      */
     _processStrategyTasks: function() {
-        if (!Memory.Taskboard?.Task?.Strategy) return;
+        if (!Memory.Taskboard || !Memory.Taskboard.Task || !Memory.Taskboard.Task.Strategy) return;
         
         const taskboard = require('lib.AP.taskboard');
         
@@ -105,43 +105,81 @@ const APTaskhandler = {
      * @private
      */
     _handleNeedCreeps: function(taskboard, roomName, strategyTask) {
-        const model = strategyTask.data?.model;
-        const count = strategyTask.data?.count;
-        const priority = strategyTask.data?.priority || 'harvest';
+        const model = strategyTask.data && strategyTask.data.model;
+        const count = strategyTask.data && strategyTask.data.count;
+        const priority = (strategyTask.data && strategyTask.data.priority) || 'harvest';
 
         if (!model || !count || count <= 0) return;
 
-        // 统计当前该型号的Creep数量
+        // ========== 第一步：始终发布Creep任务（流式架构）==========
+        // 任务是流式的，每周期都要发，unibot才能接单干活
+        // 数量 = 决策AI要求的count（这是工作负载，不是creep数量）
+        var taskType = priority;  // 决策AI指定的任务类型
+        this._publishCreepTasks(taskboard, roomName, taskType, count);
+
+        // ========== 第二步：按需发布Spawn任务（缺人才生）==========
         const currentCount = this._countCreepsByModel(roomName, model);
+        // idleCount 仅用于参考日志，不叠加到 effectiveCount（避免双重计数）
+        const idleCount = this._countIdleCreepsByModel(roomName, model);
         const deficit = count - currentCount;
 
-        if (deficit <= 0) return;  // 已满足需求
+        if (deficit <= 0) return;  // 人够了，不生成
 
-        // 【关键修复】将bodySize转换为实际能量值（Strategy用bodySize描述，spawn需要具体energy数值）
-        const room = Game.rooms[roomName];
-        const bodySize = strategyTask.data?.data?.bodySize || 'medium';
-        const energy = this._resolveEnergy(bodySize, room);
+        // 用固定模板能量值
+        const adapter = require('adapter.wasm_spawncreep');
+        var energy;
+        switch (model) {
+            case 'CommonI': energy = adapter.calcBodyCost(adapter.getCommonIBody(9999)); break;
+            case 'CarrierI': energy = adapter.calcBodyCost(adapter.getCarrierIBody(9999)); break;
+            case 'AttackerI': energy = adapter.calcBodyCost(adapter.getAttackerIBody(9999)); break;
+            case 'ClaimerI': energy = adapter.calcBodyCost(adapter.getClaimerIBody(9999)); break;
+            default: energy = 200; break;
+        }
 
-        // 转换为Spawn任务发布到Buildings类别（每次最多3个避免爆发）
+        // 每次最多补3个
         const spawnCount = Math.min(deficit, 3);
-        for (let i = 0; i < spawnCount; i++) {
+        for (var i = 0; i < spawnCount; i++) {
             taskboard.buildings.spawn(
                 roomName,
                 model,
                 priority,
                 {
-                    energy: energy,                    // ← 关键：传递实际能量值给spawncreep
-                    model: model,
-                    enableBoost: strategyTask.data?.data?.enableBoost || false,
-                    boostResource: strategyTask.data?.data?.boostResource || null
+                    energy: energy,
+                    model: model
                 }
             );
         }
 
         if (Game.time % 100 === 0) {
-            console.log("[TaskHandler] 🔄 Strategy→Spawn: 需要" + count + "个" + model +
-                       ", 当前" + currentCount + "个, 实际孵化+" + spawnCount +
-                       " (energy=" + energy + ", bodySize=" + bodySize + ")");
+            console.log("[TaskHandler] Spawn: " + model + " 需要" + count +
+                       ", 场上" + currentCount + "+空闲" + idleCount + ", 补+" + spawnCount +
+                       " (energy=" + energy + ")");
+        }
+    },
+
+    /**
+     * 发布Creep任务（流式，每周期都执行）
+     * 确保任务队列中有足够的工作让unibot接单
+     * @private
+     */
+    _publishCreepTasks: function(taskboard, roomName, taskType, targetCount) {
+        if (!taskboard.creeps[taskType]) return;
+
+        // 查看当前该类型已有多少未完成任务
+        var existingTasks = taskboard.getTasks(roomName, 'Creeps') || [];
+        var pendingCount = 0;
+        for (var i = 0; i < existingTasks.length; i++) {
+            if (existingTasks[i].type === taskType && !existingTasks[i].takenBy) pendingCount++;
+        }
+
+        // 补充到目标数量（流式：保持任务池饱满）
+        var toAdd = targetCount - pendingCount;
+        if (toAdd <= 0) return;
+
+        // 直接写入任务板（绕过 creeps.* 方法的参数校验，
+        // 因为流式任务的 sourceId/targetId 由 unibot 领取时动态绑定）
+        for (var j = 0; j < toAdd; j++) {
+            taskboard._addTask('Creeps', roomName, taskType, { autoAssign: true });
         }
     },
 
@@ -181,15 +219,47 @@ const APTaskhandler = {
     },
 
     /**
+     * 统计空闲Creep数量（有creep但没接任务的）
+     * @private
+     */
+    _countIdleCreepsByModel: function(roomName, model) {
+        var count = 0;
+        if (!Game.rooms[roomName]) return count;
+
+        var creeps = Game.rooms[roomName].find(FIND_MY_CREEPS);
+        for (var i = 0; i < creeps.length; i++) {
+            var c = creeps[i];
+            if (c.memory.model !== model) continue;
+            // 空闲：没任务 或 任务已完成（takenBy不是自己）
+            if (!c.memory.taskType || !this._isCreepBusy(c)) count++;
+        }
+        return count;
+    },
+
+    /**
+     * 检查creep是否正在执行任务
+     * @private
+     */
+    _isCreepBusy: function(creep) {
+        if (!Memory.Taskboard || !Memory.Taskboard.Task || !Memory.Taskboard.Task.Creeps) return false;
+        var roomTasks = Memory.Taskboard.Task.Creeps[creep.room.name];
+        if (!roomTasks) return false;
+        for (var i = 0; i < roomTasks.length; i++) {
+            if (roomTasks[i].takenBy === creep.name) return true;
+        }
+        return false;
+    },
+
+    /**
      * 【新增】处理市场操作需求
      * @private
      */
     _handleMarketAction: function(taskboard, roomName, task) {
         if (typeof ENABLE_MARKET !== 'undefined' && !ENABLE_MARKET) return;
         
-        const action = task.data?.action;
-        const resource = task.data?.resource;
-        const amount = task.data?.amount;
+        const action = task.data && task.data.action;
+        const resource = task.data && task.data.resource;
+        const amount = task.data && task.data.amount;
         
         console.log("[TaskHandler] 🏷️ 市场操作请求: " + action + " " + amount + " " + resource + 
                    " in " + roomName);
@@ -201,8 +271,8 @@ const APTaskhandler = {
      * @private
      */
     _handleLabProduction: function(taskboard, roomName, task) {
-        const compound = task.data?.compound;
-        const targetAmount = task.data?.targetAmount;
+        const compound = task.data && task.data.compound;
+        const targetAmount = task.data && task.data.targetAmount;
         
         console.log("[TaskHandler] 🧪 Lab生产请求: 生产 " + targetAmount + " " + compound + 
                    " in " + roomName);
@@ -413,7 +483,7 @@ const APTaskhandler = {
             const model = creep.memory.model;
 
             // 长期任务的 creep 不视为可调度资源
-            if (longTermTasks.includes(taskType)) continue;
+            if (longTermTasks.indexOf(taskType) !== -1) continue;
 
             if (!taskType || taskType === 'unibot') {
                 // 没接任务的 creep，根据型号分配潜在能力
