@@ -1,6 +1,6 @@
 # === Rust / WASM ===
-target/
-wasm-pack.log
+**/target/
+**/wasm-pack.log
 **/*.rs.bk
 
 # === Screeps 运行时（不应提交） ===
