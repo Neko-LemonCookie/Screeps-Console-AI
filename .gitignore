@@ -1,0 +1,22 @@
+# === Rust / WASM ===
+target/
+wasm-pack.log
+**/*.rs.bk
+
+# === Screeps 运行时（不应提交） ===
+Memory.json
+*.screeps/
+
+# === IDE / 编辑器 ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === 设计文档（机密，不上传） ===
+docs/
