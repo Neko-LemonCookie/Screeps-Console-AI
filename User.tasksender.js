@@ -122,7 +122,7 @@ const UserTasksender = {
                 modules.taskboard.buildings.nukeattack(roomName, data.targetRoomName);
                 break;
             case 'spawn':
-                modules.taskboard.buildings.spawn(roomName, data.model, data.energy);
+                modules.taskboard.buildings.spawn(roomName, data.model, data.priority || 'harvest', { energy: data.energy || 200 });
                 break;
             case 'linktransport':
                 modules.taskboard.buildings.linktransport(roomName);

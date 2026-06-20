@@ -13,7 +13,20 @@ const taskBuild = {
      */
     run: function(creep) {
         const data = creep.memory.taskData;
-        if (!data || !data.targetId) return;
+        if (!data) return;
+
+        // autoAssign: 动态分配能量来源
+        if (data.autoAssign) {
+            const source = this._findEnergySource(creep);
+            if (source) {
+                creep.memory.taskData = { targetId: source.id };
+            } else {
+                return; // 没有可用能量来源
+            }
+            return this.run(creep);
+        }
+
+        if (!data.targetId) return;
 
         // 状态切换
         if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
@@ -200,6 +213,20 @@ const taskBuild = {
         }
         
         return bestSite;
+    },
+
+    /**
+     * autoAssign: 动态查找能量来源
+     * @private
+     */
+    _findEnergySource: function(creep) {
+        const room = creep.room;
+        const sources = room.find(FIND_SOURCES);
+        for (const src of sources) { if (src.energy > 0) return src; }
+        if (room.storage && room.storage.store.getUsedCapacity(RESOURCE_ENERGY) > 0) return room.storage;
+        const containers = room.find(FIND_STRUCTURES, { filter: s => s.structureType === STRUCTURE_CONTAINER && s.store.getUsedCapacity(RESOURCE_ENERGY) > 0 });
+        if (containers.length > 0) return containers[0];
+        return null;
     },
 
 };

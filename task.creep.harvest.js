@@ -12,7 +12,28 @@ const taskHarvest = {
      */
     run: function(creep) {
         const data = creep.memory.taskData;
-        if (!data || !data.sourceId || !data.targetId) return;
+        if (!data) return;
+
+        // autoAssign: 动态分配 source 和 target
+        if (data.autoAssign) {
+            const sources = creep.room.find(FIND_SOURCES);
+            // 优先选择能量剩余多且槽位空闲的 source
+            let bestSource = null;
+            let bestScore = -1;
+            for (const src of sources) {
+                const nearbyCreeps = src.pos.findInRange(FIND_MY_CREEPS, 1, { filter: c => c.memory.taskType === 'harvest' }).length;
+                const score = src.energy - nearbyCreeps * 100;
+                if (score > bestScore) { bestScore = score; bestSource = src; }
+            }
+            if (bestSource) {
+                creep.memory.taskData = { sourceId: bestSource.id, targetId: 'base' };
+            } else {
+                return; // 没有可用 source
+            }
+            return this.run(creep); // 用新 data 重新执行
+        }
+
+        if (!data.sourceId || !data.targetId) return;
 
         // 0. 强化 (Boost) 检查：如果房间内有 work 强化任务，且自身 TTL 足够，则转换任务
         if (creep.ticksToLive > 1200) {

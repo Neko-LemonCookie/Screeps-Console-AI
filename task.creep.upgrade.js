@@ -12,7 +12,20 @@ const taskUpgrade = {
      */
     run: function(creep) {
         const data = creep.memory.taskData;
-        if (!data || !data.targetId) return;
+        if (!data) return;
+
+        // autoAssign: 动态分配能量来源
+        if (data.autoAssign) {
+            const source = this._findEnergySource(creep);
+            if (source) {
+                creep.memory.taskData = { targetId: source.id };
+            } else {
+                return; // 没有可用能量来源
+            }
+            return this.run(creep);
+        }
+
+        if (!data.targetId) return;
 
         // 状态切换：完成一次升级循环（背包空）则结束任务
         if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
@@ -51,16 +64,37 @@ const taskUpgrade = {
 
         let result;
         if (target.store) {
-            // 如果是建筑，使用 withdraw
             result = creep.withdraw(target, RESOURCE_ENERGY);
         } else {
-            // 如果是 Source，使用 harvest
             result = creep.harvest(target);
         }
 
         if (result === ERR_NOT_IN_RANGE) {
             creep.moveTo(target, { visualizePathStyle: { stroke: '#ffaa00' } });
         }
+    },
+
+    /**
+     * autoAssign: 动态查找能量来源
+     * 优先级: source > storage > container > link
+     * @private
+     */
+    _findEnergySource: function(creep) {
+        const room = creep.room;
+        // 1. Source (含能量)
+        const sources = room.find(FIND_SOURCES);
+        for (const src of sources) {
+            if (src.energy > 0) return src;
+        }
+        // 2. Storage
+        if (room.storage && room.storage.store.getUsedCapacity(RESOURCE_ENERGY) > 0) return room.storage;
+        // 3. Container
+        const containers = room.find(FIND_STRUCTURES, { filter: s => s.structureType === STRUCTURE_CONTAINER && s.store.getUsedCapacity(RESOURCE_ENERGY) > 0 });
+        if (containers.length > 0) return containers[0];
+        // 4. Link
+        const links = room.find(FIND_STRUCTURES, { filter: s => s.structureType === STRUCTURE_LINK && s.store.getUsedCapacity(RESOURCE_ENERGY) > 0 });
+        if (links.length > 0) return links[0];
+        return null;
     },
 
 };

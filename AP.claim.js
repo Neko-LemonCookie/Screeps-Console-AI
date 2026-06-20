@@ -27,6 +27,15 @@ const APClaim = {
 
             this._runRoom(room);
         }
+
+        // 新房间经济启动检查（每tick对所有房间执行一次，O(N) 而非 O(N²)）
+        for (const roomName in Game.rooms) {
+            const room = Game.rooms[roomName];
+            if (!room.controller || !room.controller.my) continue;
+            if (room.storage && room.terminal) {
+                this._bootstrapNewRoom(room.name);
+            }
+        }
     },
 
     _runRoom: function(room) {
@@ -76,16 +85,6 @@ const APClaim = {
         // 【新增】检查本房间是否是新claim成功的，需要启动经济
         if (room.storage && room.terminal) {
             this._bootstrapNewRoom(room.name);
-        }
-
-        // 【新增】遍历所有自己的房间，检查是否有需要启动的新房间
-        for (var rn in Game.rooms) {
-            var r = Game.rooms[rn];
-            if (!r.controller || !r.controller.my) continue;
-            if (r.name === room.name) continue;  // 已在上面处理过
-            if (r.storage && r.terminal) {
-                this._bootstrapNewRoom(r.name);
-            }
         }
     },
 

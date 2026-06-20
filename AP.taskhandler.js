@@ -106,52 +106,55 @@ const APTaskhandler = {
      */
     _handleNeedCreeps: function(taskboard, roomName, strategyTask) {
         const model = strategyTask.data && strategyTask.data.model;
-        const count = strategyTask.data && strategyTask.data.count;
+        const deficit = strategyTask.data && strategyTask.data.count;  // 策略层传的是差值（还需多少个）
         const priority = (strategyTask.data && strategyTask.data.priority) || 'harvest';
+        const taskOnly = strategyTask.data && strategyTask.data.data && strategyTask.data.data.taskOnly;
+        const spawnOnly = strategyTask.data && strategyTask.data.data && strategyTask.data.data.spawnOnly;
+        const taskTarget = (taskOnly && strategyTask.data && strategyTask.data.targetCount) || 1;
 
-        if (!model || !count || count <= 0) return;
+        if (!model) return;
 
-        // ========== 第一步：始终发布Creep任务（流式架构）==========
-        // 任务是流式的，每周期都要发，unibot才能接单干活
-        // 数量 = 决策AI要求的count（这是工作负载，不是creep数量）
-        var taskType = priority;  // 决策AI指定的任务类型
-        this._publishCreepTasks(taskboard, roomName, taskType, count);
-
-        // ========== 第二步：按需发布Spawn任务（缺人才生）==========
         const currentCount = this._countCreepsByModel(roomName, model);
-        // idleCount 仅用于参考日志，不叠加到 effectiveCount（避免双重计数）
         const idleCount = this._countIdleCreepsByModel(roomName, model);
-        const deficit = count - currentCount;
 
-        if (deficit <= 0) return;  // 人够了，不生成
+        // taskOnly模式：只发布Creep任务，不生成新creep（用于upgrade/repair等辅助任务）
+        if (taskOnly) {
+            this._publishCreepTasks(taskboard, roomName, priority, taskTarget);
+            return;
+        }
 
-        // 用固定模板能量值
+        if (!deficit || deficit <= 0) return;
+
+        // spawnOnly模式：只生成creep，不发Creep任务（任务由taskOnly单独管理）
+        if (!spawnOnly) {
+            const totalTarget = currentCount + deficit;
+            this._publishCreepTasks(taskboard, roomName, priority, totalTarget);
+        }
+
+        // ========== 第二步：按需发布Spawn任务（差值已经是需补数）==========
+        if (deficit <= 0) return;
+
+        // 用房间实际能量容量计算模板能量值
         const adapter = require('adapter.wasm_spawncreep');
+        const room = Game.rooms[roomName];
+        const roomEnergyCap = room ? room.energyCapacityAvailable : 300;
         var energy;
         switch (model) {
-            case 'CommonI': energy = adapter.calcBodyCost(adapter.getCommonIBody(9999)); break;
-            case 'CarrierI': energy = adapter.calcBodyCost(adapter.getCarrierIBody(9999)); break;
-            case 'AttackerI': energy = adapter.calcBodyCost(adapter.getAttackerIBody(9999)); break;
-            case 'ClaimerI': energy = adapter.calcBodyCost(adapter.getClaimerIBody(9999)); break;
+            case 'CommonI': energy = adapter.calcBodyCost(adapter.getCommonIBody(roomEnergyCap)); break;
+            case 'CarrierI': energy = adapter.calcBodyCost(adapter.getCarrierIBody(roomEnergyCap)); break;
+            case 'AttackerI': energy = adapter.calcBodyCost(adapter.getAttackerIBody(roomEnergyCap)); break;
+            case 'ClaimerI': energy = adapter.calcBodyCost(adapter.getClaimerIBody(roomEnergyCap)); break;
             default: energy = 200; break;
         }
 
         // 每次最多补3个
         const spawnCount = Math.min(deficit, 3);
         for (var i = 0; i < spawnCount; i++) {
-            taskboard.buildings.spawn(
-                roomName,
-                model,
-                priority,
-                {
-                    energy: energy,
-                    model: model
-                }
-            );
+            taskboard.buildings.spawn(roomName, model, priority, { energy: energy, model: model });
         }
 
         if (Game.time % 100 === 0) {
-            console.log("[TaskHandler] Spawn: " + model + " 需要" + count +
+            console.log("[TaskHandler] Spawn: " + model + " 需补" + deficit +
                        ", 场上" + currentCount + "+空闲" + idleCount + ", 补+" + spawnCount +
                        " (energy=" + energy + ")");
         }
@@ -165,15 +168,15 @@ const APTaskhandler = {
     _publishCreepTasks: function(taskboard, roomName, taskType, targetCount) {
         if (!taskboard.creeps[taskType]) return;
 
-        // 查看当前该类型已有多少未完成任务
+        // 统计全部同类型任务（含已分配），避免任务堆积
         var existingTasks = taskboard.getTasks(roomName, 'Creeps') || [];
-        var pendingCount = 0;
+        var totalCount = 0;
         for (var i = 0; i < existingTasks.length; i++) {
-            if (existingTasks[i].type === taskType && !existingTasks[i].takenBy) pendingCount++;
+            if (existingTasks[i].type === taskType) totalCount++;
         }
 
-        // 补充到目标数量（流式：保持任务池饱满）
-        var toAdd = targetCount - pendingCount;
+        // 补充到目标数量
+        var toAdd = targetCount - totalCount;
         if (toAdd <= 0) return;
 
         // 直接写入任务板（绕过 creeps.* 方法的参数校验，
@@ -199,22 +202,18 @@ const APTaskhandler = {
     },
 
     /**
-     * 【新增】统计指定房间内指定型号的Creep数量
-     * @param {string} roomName 房间名
+     * 统计指定型号的Creep数量（全局统计，包括跨房工作的creep）
+     * @param {string} roomName 房间名（用于 spawnRoom 匹配）
      * @param {string} model Creep型号
      * @returns {number} 数量
      * @private
      */
     _countCreepsByModel: function(roomName, model) {
         let count = 0;
-        
-        if (Game.rooms[roomName]) {
-            const creeps = Game.rooms[roomName].find(FIND_MY_CREEPS);
-            for (const creep of creeps) {
-                if (creep.memory.model === model) count++;
-            }
+        for (const name in Game.creeps) {
+            const creep = Game.creeps[name];
+            if (creep.memory.model === model && creep.memory.spawnRoom === roomName) count++;
         }
-        
         return count;
     },
 
@@ -476,31 +475,25 @@ const APTaskhandler = {
 
         // 1. 统计当前房间内的有效 creep（仅遍历本房间，不全局扫描）
         const roomCreeps = room.find(FIND_MY_CREEPS);
-        const longTermTasks = ['harvest', 'upgrade', 'attack', 'police', 'globalcarry', 'claim', 'claimupgrade', 'claimbuild'];
+        const longTermTasks = ['attack', 'police', 'globalcarry', 'claim', 'claimupgrade', 'claimbuild'];
 
         for (const creep of roomCreeps) {
             const taskType = creep.memory.taskType;
             const model = creep.memory.model;
 
-            // 长期任务的 creep 不视为可调度资源
+            // 长期任务的 creep 不视为可调度资源（harvest/upgrade 除外，需计入防重复生成）
             if (longTermTasks.indexOf(taskType) !== -1) continue;
 
             if (!taskType || taskType === 'unibot') {
-                // 没接任务的 creep，根据型号分配潜在能力
+                // 没接任务的 creep，根据型号分配潜在能力（每种型号只计1个，不重复计数）
                 if (model === 'CommonI') {
-                    validCreeps['harvest'] = (validCreeps['harvest'] || 0);
-                    validCreeps['upgrade'] = (validCreeps['upgrade'] || 0);
-                    validCreeps['repair'] = (validCreeps['repair'] || 0);
-                    validCreeps['build'] = (validCreeps['build'] || 0);
-                    validCreeps['carry'] = (validCreeps['carry'] || 0);
+                    validCreeps['harvest'] = (validCreeps['harvest'] || 0) + 1;
                 } else if (model === 'CarrierI') {
-                    validCreeps['carry'] = (validCreeps['carry'] || 0);
+                    validCreeps['carry'] = (validCreeps['carry'] || 0) + 1;
                 } else if (model === 'AttackerI') {
-                    validCreeps['police'] = (validCreeps['police'] || 0);
-                    validCreeps['attack'] = (validCreeps['attack'] || 0);
+                    validCreeps['police'] = (validCreeps['police'] || 0) + 1;
                 } else if (model === 'ClaimerI') {
-                    validCreeps['claim'] = (validCreeps['claim'] || 0);
-                    validCreeps['reserve'] = (validCreeps['reserve'] || 0);
+                    validCreeps['claim'] = (validCreeps['claim'] || 0) + 1;
                 }
             } else {
                 // 接了任务的 creep，按任务类型统计
@@ -516,32 +509,16 @@ const APTaskhandler = {
             const model = task.data.model;
             switch (model) {
                 case 'AttackerI':
-                    if (!validCreeps['attack']) validCreeps['attack'] = 0;
-                    if (!validCreeps['police']) validCreeps['police'] = 0;
-                    validCreeps['attack']++;
-                    validCreeps['police']++;
+                    validCreeps['police'] = (validCreeps['police'] || 0) + 1;
                     break;
                 case 'CarrierI':
-                    if (!validCreeps['carry']) validCreeps['carry'] = 0;
-                    validCreeps['carry']++;
+                    validCreeps['carry'] = (validCreeps['carry'] || 0) + 1;
                     break;
                 case 'ClaimerI':
-                    if (!validCreeps['claim']) validCreeps['claim'] = 0;
-                    if (!validCreeps['reserve']) validCreeps['reserve'] = 0;
-                    validCreeps['claim']++;
-                    validCreeps['reserve']++;
+                    validCreeps['claim'] = (validCreeps['claim'] || 0) + 1;
                     break;
                 case 'CommonI':
-                    if (!validCreeps['harvest']) validCreeps['harvest'] = 0;
-                    if (!validCreeps['upgrade']) validCreeps['upgrade'] = 0;
-                    if (!validCreeps['repair']) validCreeps['repair'] = 0;
-                    if (!validCreeps['build']) validCreeps['build'] = 0;
-                    if (!validCreeps['carry']) validCreeps['carry'] = 0;
-                    validCreeps['harvest']++;
-                    validCreeps['upgrade']++;
-                    validCreeps['repair']++;
-                    validCreeps['build']++;
-                    validCreeps['carry']++;
+                    validCreeps['harvest'] = (validCreeps['harvest'] || 0) + 1;
                     break;
             }
         }

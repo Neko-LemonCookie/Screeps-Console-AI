@@ -7,7 +7,7 @@ const DevelopV1_L3 = {
     CONFIG: {
         REFRESH_INTERVAL: 50,
         CREEP_CONFIG: {
-            CommonI: { minCount: 4, maxCount: 6, bodySize: 'small', priorities: ['harvest','upgrade','build','repair'] }
+            CommonI: { minCount: 5, maxCount: 5, bodySize: 'small', priorities: ['harvest','upgrade','build','repair'] }
         }
     },
 
@@ -42,13 +42,37 @@ const DevelopV1_L3 = {
         const taskboard = require('lib.AP.taskboard');
         const config = this.CONFIG.CREEP_CONFIG.CommonI;
         const current = state.commonICount;
+
+        if (current === 0) return;
+
+        const sourceCount = state.sourceCount || 2;
+        const harvestCount = sourceCount * 3;
+        const upgradeCount = 3;
+
+        // ====== Spawn 需求（只在缺人时创建）======
         if (current < config.minCount) {
             taskboard.strategy.needCreeps(room.name, {
                 model: 'CommonI', count: config.minCount - current,
-                priority: 'harvest', data: { bodySize: config.bodySize, urgent: current < 2 }
+                priority: 'harvest', data: { bodySize: config.bodySize, urgent: current < 2, spawnOnly: true }
             });
         } else if (current < config.maxCount && state.constructionSites > 3) {
-            taskboard.strategy.needCreeps(room.name, { model: 'CommonI', count: 1, priority: 'build', data: { bodySize: config.bodySize } });
+            taskboard.strategy.needCreeps(room.name, { model: 'CommonI', count: 1, priority: 'build', data: { bodySize: config.bodySize, spawnOnly: true } });
+        }
+
+        // ====== 任务分发：直接写入 Creeps 任务板 ======
+        this._ensureCreepTasks(taskboard, room.name, 'harvest', harvestCount);
+        this._ensureCreepTasks(taskboard, room.name, 'upgrade', upgradeCount);
+    },
+
+    _ensureCreepTasks: function(taskboard, roomName, taskType, targetCount) {
+        var existing = taskboard.getTasks(roomName, 'Creeps');
+        var count = 0;
+        for (var i = 0; i < existing.length; i++) {
+            if (existing[i].type === taskType) count++;
+        }
+        var toAdd = targetCount - count;
+        for (var j = 0; j < toAdd; j++) {
+            taskboard._addTask('Creeps', roomName, taskType, { autoAssign: true });
         }
     },
 

@@ -29,20 +29,38 @@ const libAPTaskboard = {
         // Creeps 任务是流式的，需要多个同名任务供不同 creep 领取，不能去重
         if (category !== 'Creeps') {
             var existing = Memory.Taskboard.Task[category][roomName];
-            var isDupe = false;
             for (var i = 0; i < existing.length; i++) {
+                // 跳过已处理的任务（takenBy 不为 null），它们不应阻止新任务创建
+                if (existing[i].takenBy) continue;
                 if (existing[i].type === type) {
-                    // 有 model 字段时按 type+model 去重
-                    if (existing[i].data && data && existing[i].data.model && data.model) {
-                        if (existing[i].data.model === data.model) { isDupe = true; break; }
-                    } else if (!existing[i].data.model && !data.model) {
-                        // 无 model 字段时按 type 去重（防止同类多实例被误杀）
-                        isDupe = true;
-                        break;
+                    // need_creeps 任务按 type+model+priority+(taskOnly/spawnOnly) 去重
+                    if (type === 'need_creeps') {
+                        if (existing[i].data && data &&
+                            existing[i].data.model === data.model &&
+                            existing[i].data.priority === data.priority) {
+                            // 区分 taskOnly 和 spawnOnly：两者不算重复
+                            var existingTaskOnly = existing[i].data.data && existing[i].data.data.taskOnly;
+                            var existingSpawnOnly = existing[i].data.data && existing[i].data.data.spawnOnly;
+                            var newTaskOnly = data.data && data.data.taskOnly;
+                            var newSpawnOnly = data.data && data.data.spawnOnly;
+                            if (existingTaskOnly === newTaskOnly && existingSpawnOnly === newSpawnOnly) return;
+                        }
+                    }
+                    // 有 model 字段时按 type+model 去重（如 spawn 任务）
+                    else if (existing[i].data && data && existing[i].data.model && data.model) {
+                        if (existing[i].data.model === data.model) return;
+                    }
+                    // 有 resourceType 字段时按 type+resourceType 去重（如 produce/market 任务）
+                    else if (existing[i].data && data && existing[i].data.resourceType && data.resourceType) {
+                        if (existing[i].data.resourceType === data.resourceType) return;
+                    }
+                    // 无 model 且无 resourceType 时按 type 去重
+                    else if (!(existing[i].data && existing[i].data.model) && !(data && data.model) &&
+                             !(existing[i].data && existing[i].data.resourceType) && !(data && data.resourceType)) {
+                        return;
                     }
                 }
             }
-            if (isDupe) return;
         }
 
         Memory.Taskboard.Task[category][roomName].push({
@@ -290,7 +308,7 @@ const libAPTaskboard = {
             libAPTaskboard._addTask('Buildings', roomName, 'spawn', {
                 model: model,
                 priority: priority,
-                data: data || {},
+                energy: (data && data.energy) || 200,
                 requestedTime: Game.time
             });
         },
@@ -317,10 +335,11 @@ const libAPTaskboard = {
      */
     strategy: {
         needCreeps: function(roomName, options) {
-            if (!roomName || !options || !options.model || !options.count) return;
+            if (!roomName || !options || !options.model || (!options.count && options.count !== 0)) return;
             libAPTaskboard._addTask('Strategy', roomName, 'need_creeps', {
                 model: options.model,
                 count: options.count,
+                targetCount: options.targetCount,
                 priority: options.priority || 'harvest',
                 data: options.data || {},
                 refreshInterval: options.refreshInterval || 100

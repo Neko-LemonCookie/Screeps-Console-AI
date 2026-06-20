@@ -35,7 +35,10 @@ const buildingSpawn = {
         
         let bestTask = null;
         let bestTaskIndex = -1;
+        let bestTaskEnergy = 200;
         let minPriorityIndex = Infinity;
+
+        const adapter = require('adapter.wasm_spawncreep');
 
         for (let i = 0; i < tasks.length; i++) {
             const task = tasks[i];
@@ -43,25 +46,24 @@ const buildingSpawn = {
             if (task.type !== 'spawn' || task.takenBy) continue;
             
             const model = task.data.model;
-        // 3. 用固定模板能量值判断，不够就跳过（不传动态值）
-        const adapter = require('adapter.wasm_spawncreep');
-        var requiredEnergy = task.data.energy;
-        if (!requiredEnergy || typeof requiredEnergy !== 'number') {
-            // 没有固定能量值时从模板获取
-            switch (model) {
-                case 'CommonI': requiredEnergy = adapter.calcBodyCost(adapter.getCommonIBody(9999)); break;
-                case 'CarrierI': requiredEnergy = adapter.calcBodyCost(adapter.getCarrierIBody(9999)); break;
-                case 'AttackerI': requiredEnergy = adapter.calcBodyCost(adapter.getAttackerIBody(9999)); break;
-                case 'ClaimerI': requiredEnergy = adapter.calcBodyCost(adapter.getClaimerIBody(9999)); break;
-                default: requiredEnergy = 200; break;
+            // 3. 用固定模板能量值判断，不够就跳过（不传动态值）
+            var taskEnergy = task.data.energy;
+            if (!taskEnergy || typeof taskEnergy !== 'number') {
+                // 没有固定能量值时从模板获取
+                switch (model) {
+                    case 'CommonI': taskEnergy = adapter.calcBodyCost(adapter.getCommonIBody(9999)); break;
+                    case 'CarrierI': taskEnergy = adapter.calcBodyCost(adapter.getCarrierIBody(9999)); break;
+                    case 'AttackerI': taskEnergy = adapter.calcBodyCost(adapter.getAttackerIBody(9999)); break;
+                    case 'ClaimerI': taskEnergy = adapter.calcBodyCost(adapter.getClaimerIBody(9999)); break;
+                    default: taskEnergy = 200; break;
+                }
             }
-        }
-        if (!requiredEnergy) requiredEnergy = 200;
+            if (!taskEnergy) taskEnergy = 200;
 
-        // RCL3以下禁止生成AttackerI
-        if (model === 'AttackerI' && rcl < 4) continue;
+            // RCL3以下禁止生成AttackerI
+            if (model === 'AttackerI' && rcl < 4) continue;
 
-        if (spawn.room.energyAvailable < requiredEnergy) continue;
+            if (spawn.room.energyAvailable < taskEnergy) continue;
 
             const pIndex = priority.indexOf(model);
             const currentPriority = pIndex === -1 ? 99 : pIndex;
@@ -70,11 +72,13 @@ const buildingSpawn = {
                 minPriorityIndex = currentPriority;
                 bestTask = task;
                 bestTaskIndex = i;
+                bestTaskEnergy = taskEnergy;
             } else if (currentPriority === minPriorityIndex) {
                 // 如果同一类型有多个单，接创建时间最早的那一个
                 if (bestTask && task.createdTime < bestTask.createdTime) {
                     bestTask = task;
                     bestTaskIndex = i;
+                    bestTaskEnergy = taskEnergy;
                 }
             }
         }
@@ -84,8 +88,7 @@ const buildingSpawn = {
             // 在生成前先标记，避免多 spawn 时造成重复生成
             bestTask.takenBy = spawn.name;
 
-            const spawnEnergy = requiredEnergy;  // 始终用固定模板值，不用动态room energy
-            const result = spawncreep.spawn(spawn, bestTask.data.model, spawnEnergy);
+            const result = spawncreep.spawn(spawn, bestTask.data.model, bestTaskEnergy);
 
             if (result === OK) {
                 // 5. 生成后在内存中删除该任务（使用 takenBy 精准删除，避免索引漂移）
