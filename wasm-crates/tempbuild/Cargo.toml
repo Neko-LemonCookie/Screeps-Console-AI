@@ -6,10 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [lib]
-crate-type = ["cdylib", "rlib"]
-
-[dependencies]
-wasm-bindgen = { workspace = true }
+crate-type = ["cdylib"]
 
 [profile.release]
 opt-level = "s"

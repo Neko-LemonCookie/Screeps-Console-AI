@@ -1,89 +1,111 @@
 /**
  * lib.AP.wasm_loader.js
  *
- * 统一WASM模块加载器（Screeps专用）
+ * WASM Side Module 加载器（Screeps专用）
  *
- * 设计原则：
- * - Screeps不支持 import.meta.url / fetch()，使用 initSync + 内联字节同步加载
- * - 所有WASM模块在此集中初始化，各adapter通过本文件获取实例
- * - 加载失败时自动降级为null，adapter侧有JS回退实现
+ * Screeps 原生支持 Binary 模块：
+ *   require('module_name') 返回 ArrayBuffer（.wasm 原始字节）
+ *   直接用 WebAssembly.Module/Instance 加载，零胶水代码，零导入依赖
  *
- * 依赖：
- *   wasm/calculate_claim.js  → Uint8Array (calculate_claim.wasm 原始字节)
- *   wasm/spawncreep.js       → Uint8Array (spawncreep.wasm 原始字节)
- *   wasm/tempbuild.js        → Uint8Array (tempbuild.wasm 原始字节)
- *   wasm-crates/*/pkg/*.js   → wasm-pack 生成的胶水代码（导出 initSync）
+ * 数据流：
+ *   JS业务代码 → adapter(薄包装) → 本加载器 → WebAssembly Instance.exports
+ *
+ * Body Part 编码常量（与Rust侧一致）:
+ *   0=move, 1=work, 2=carry, 3=attack, 4=ranged_attack, 5=claim
  */
 
-const APWasmLoader = {
-    // 已初始化的WASM模块实例（供adapter引用）
-    calculate_claim: null,
-    spawncreep: null,
-    tempbuild: null,
-
-    // 初始化状态标志
-    _initialized: false,
+var APWasmLoader = {
+    // 已编译的模块实例（全局缓存，每tick复用）
+    _instances: {},
+    _memViews: {},   // 各模块的内存 Uint8Array 视图
 
     /**
-     * 同步初始化所有WASM模块（在 memcleaner 或 main.js 入口处调用一次即可）
-     * 每个模块独立 try-catch，单个失败不影响其他
+     * 同步初始化所有WASM模块（main.js 入口调用一次即可）
+     * 单个失败不影响其他，不可用时对应instance为null（adapter有JS回退）
      */
     initAll: function() {
-        if (this._initialized) return;
-        this._initialized = true;
+        this._instances.calculate_claim = this._loadModule('calculate_claim');
+        this._instances.spawncreep = this._loadModule('spawncreep');
+        this._instances.tempbuild = this._loadModule('tempbuild');
 
-        this.calculate_claim = this._initModule('calculate_claim', function(bytes) {
-            var glue = require('wasm-crates/calculate_claim/pkg/screeps_wasm_calculate_claim.js');
-            glue.initSync(bytes);
-            return glue;
-        });
-
-        this.spawncreep = this._initModule('spawncreep', function(bytes) {
-            var glue = require('wasm-crates/spawncreep/pkg/screeps_wasm_spawncreep.js');
-            glue.initSync(bytes);
-            return glue;
-        });
-
-        this.tempbuild = this._initModule('tempbuild', function(bytes) {
-            var glue = require('wasm-crates/tempbuild/pkg/screeps_wasm_tempbuild.js');
-            glue.initSync(bytes);
-            return glue;
-        });
-
-        var okCount = [this.calculate_claim, this.spawncreep, this.tempbuild].filter(Boolean).length;
-        console.log("[WasmLoader] 初始化完成: " + okCount + "/3 模块就绪");
+        var ok = 0;
+        for (var name in this._instances) {
+            if (this._instances[name]) ok++;
+        }
+        console.log('[WasmLoader] Side Module 初始化: ' + ok + '/3 就绪');
     },
 
     /**
-     * 单模块初始化（带容错）
-     * @param {string} name 模块名（用于日志）
-     * @param {function} loaderFn 接受bytes返回glue对象的函数
-     * @returns {object|null} 初始化后的glue对象，失败返回null
+     * 加载单个WASM Side Module
+     * @param {string} name 模块名（与文件名一致，如 'calculate_claim'）
+     * @returns {object|null} WebAssembly Instance 的 exports 对象，失败返回null
      * @private
      */
-    _initModule: function(name, loaderFn) {
+    _loadModule: function(name) {
         try {
-            var bytes = require('wasm/' + name + '.js');
-            if (!bytes || !(bytes instanceof Uint8Array)) {
-                console.warn("[WasmLoader] " + name + ": 字节文件无效");
+            // Screeps: require(Binary模块名) 返回 ArrayBuffer
+            var binBuffer = require(name);
+            if (!binBuffer || !(binBuffer instanceof ArrayBuffer)) {
+                console.warn('[WasmLoader] ' + name + ': require未返回ArrayBuffer');
                 return null;
             }
-            var module = loaderFn(bytes);
-            console.log("[WasmLoader] " + name + ": OK");
-            return module;
+
+            // 编译 + 实例化（Side Module 无导入依赖，传空对象）
+            var mod = new WebAssembly.Module(binBuffer);
+            var inst = new WebAssembly.Instance(mod, {});
+
+            // 缓存内存视图供adapter读取共享缓冲区
+            if (inst.exports.memory) {
+                this._memViews[name] = new Uint8Array(inst.exports.memory.buffer);
+            }
+
+            console.log('[WasmLoader] ' + name + ': OK (' + binBuffer.byteLength + ' bytes)');
+            return inst.exports;
         } catch (e) {
-            console.warn("[WasmLoader] " + name + " 加载失败: " + (e.message || e));
+            console.warn('[WasmLoader] ' + name + ' 加载失败: ' + (e.message || e));
             return null;
         }
     },
 
     /**
+     * 获取指定模块的导出函数
+     * @param {string} name 模块名
+     * @returns {object|null} exports对象
+     */
+    getExports: function(name) {
+        return this._instances[name] || null;
+    },
+
+    /**
+     * 获取指定模块的内存视图（用于读取共享缓冲区）
+     * @param {string} name 模块名
+     * @returns {Uint8Array|null}
+     */
+    getMemory: function(name) {
+        return this._memViews[name] || null;
+    },
+
+    /**
      * 检查指定模块是否可用
-     * @param {string} name 'calculate_claim' | 'spawncreep' | 'tempbuild'
-     * @returns {boolean}
      */
     isReady: function(name) {
-        return this[name] !== null;
+        return this._instances[name] !== null && this._instances[name] !== undefined;
+    }
+};
+
+// === Body Part 编码/解码常量（与Rust侧完全一致）===
+APWasmLoader.PART = {
+    MOVE: 0, WORK: 1, CARRY: 2,
+    ATTACK: 3, RANGED_ATTACK: 4, CLAIM: 5,
+    /** 将编码字节还原为Screeps部件名称 */
+    decode: function(code) {
+        var names = ['move', 'work', 'carry', 'attack', 'ranged_attack', 'claim'];
+        return names[code] || 'move';
+    },
+    /** 将Screeps部件名称编码为字节 */
+    encode: function(name) {
+        var map = { move:0, work:1, carry:2, attack:3, ranged_attack:4, claim:5 };
+        return map[name] !== undefined ? map[name] : 0;
     }
 };
 

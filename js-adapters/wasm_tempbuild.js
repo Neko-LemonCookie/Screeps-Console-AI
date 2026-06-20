@@ -1,60 +1,81 @@
 /**
  * js-adapters/wasm_tempbuild.js
  *
- * WASM 版本的 tempbuild 模块适配器
- * 通过 lib.AP.wasm_loader 同步加载，Screeps 完全兼容
+ * WASM Side Module 适配器 - 基建布局
+ *
+ * 采矿位通过双向共享内存传输：
+ *   JS写墙坐标→输入缓冲区 → WASM计算 → 写结果到输出缓冲区 → JS读取
  */
 
 var _loader = null;
+var _exports = null;
+var _mem = null;
 
-function _getLoader() {
+function _get() {
     if (!_loader) _loader = require('lib.AP.wasm_loader');
-    return _loader;
+    if (!_exports) _exports = _loader.getExports('tempbuild');
+    if (!_mem && _exports) _mem = _loader.getMemory('tempbuild');
+    return { loader: _loader, exports: _exports, mem: _mem };
 }
 
 function isWasmAvailable() {
-    return _getLoader().isReady('tempbuild');
+    return _get().exports !== null;
 }
 
 const wasmTempBuild = {
     /**
      * 获取采矿位坐标
-     * @param {number} x 对象 X 坐标
-     * @param {number} y 对象 Y 坐标
-     * @param {Array<Array<number>>} walls 墙坐标数组 [[x,y], ...]
-     * @returns {Array<{x: number, y: number}>} 采矿位列表
+     * @param {number} x 对象X坐标
+     * @param {number} y 对象Y坐标
+     * @param {Array<Array<number>>} walls 墙坐标 [[x,y], ...]
+     * @returns {Array<{x:number, y:number}>}
      */
     getMiningSpots: function(x, y, walls) {
-        var wasm = _getLoader().tempbuild;
-        if (!wasm) {
-            // JS 回退实现（从原始代码提取）
-            var spots = [];
-            for (var dx = -1; dx <= 1; dx++) {
-                for (var dy = -1; dy <= 1; dy++) {
-                    if (dx === 0 && dy === 0) continue;
-                    var px = x + dx;
-                    var py = y + dy;
-                    if (px < 0 || px > 49 || py < 0 || py > 49) continue;
-                    spots.push({ x: px, y: py });
-                }
+        var r = _get();
+        if (r.exports && r.mem) {
+            // 1. 写入墙坐标到输入缓冲区
+            var inPtr = r.exports.input_ptr();
+            var wallCount = (walls || []).length;
+            for (var i = 0; i < wallCount; i++) {
+                r.mem[inPtr + i * 2]     = walls[i][0];
+                r.mem[inPtr + i * 2 + 1] = walls[i][1];
             }
-            return spots;
+
+            // 2. 调用WASM计算，返回采矿位数量
+            var count = r.exports.get_mining_spots(x, y, wallCount);
+
+            // 3. 从输出缓冲区读取结果
+            if (count > 0) {
+                var outPtr = r.exports.output_ptr();
+                var spots = [];
+                for (var j = 0; j < count; j++) {
+                    spots.push({
+                        x: r.mem[outPtr + j * 2],
+                        y: r.mem[outPtr + j * 2 + 1]
+                    });
+                }
+                return spots;
+            }
+            return [];
         }
 
-        // 转换为扁平数组格式
-        var wallsFlat = [];
-        for (var i = 0; i < (walls || []).length; i++) {
-            wallsFlat.push(walls[i][0]);
-            wallsFlat.push(walls[i][1]);
+        // JS回退（从原始代码提取）
+        var spots = [];
+        for (var dx = -1; dx <= 1; dx++) {
+            for (var dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                var px = x + dx;
+                var py = y + dy;
+                if (px < 0 || px > 49 || py < 0 || py > 49) continue;
+
+                var blocked = false;
+                for (var w = 0; w < wallCount; w++) {
+                    if (walls[w][0] === px && walls[w][1] === py) { blocked = true; break; }
+                }
+                if (!blocked) spots.push({ x: px, y: py });
+            }
         }
-
-        // 调用 WASM 函数，返回 MiningSpot 对象数组
-        var result = wasm.get_mining_spots(x, y, wallsFlat);
-
-        // 转换为标准 JS 格式
-        return result.map(function(spot) {
-            return { x: spot.x, y: spot.y };
-        });
+        return spots;
     },
 
     isWasmReady: isWasmAvailable
