@@ -17,6 +17,7 @@ Object.defineProperty(refs, 'tempbuild', { get: () => cache.tempbuild || (cache.
 Object.defineProperty(refs, 'automarket', { get: () => cache.automarket || (cache.automarket = require('lib.AP.automarket')) });
 Object.defineProperty(refs, 'calculate_claim', { get: () => cache.calculate_claim || (cache.calculate_claim = require('lib.AP.calculate_claim')) });
 Object.defineProperty(refs, 'search', { get: () => cache.search || (cache.search = require('lib.AP.search')) });
+Object.defineProperty(refs, 'wasmLoader', { get: () => cache.wasmLoader || (cache.wasmLoader = require('lib.AP.wasm_loader')) });
 
 // AP 核心逻辑
 Object.defineProperty(refs, 'developv1', { get: () => cache.developv1 || (cache.developv1 = require('AP.developv1')) });

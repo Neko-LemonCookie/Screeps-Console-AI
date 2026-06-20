@@ -1,5 +1,6 @@
 # === Rust / WASM ===
 **/target/
+**/pkg/
 **/wasm-pack.log
 **/*.rs.bk
 
@@ -20,3 +21,6 @@ Thumbs.db
 
 # === 设计文档（机密，不上传） ===
 docs/
+
+# === WASM产物（原始二进制不提交，只提交js包装器） ===
+wasm/*.wasm

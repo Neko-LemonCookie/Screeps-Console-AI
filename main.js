@@ -13,6 +13,9 @@ module.exports.loop = function () {
     // 1. 系统维护与数据刷新
     modules.memcleaner.run();
 
+    // 1.5 WASM模块初始化（仅首次执行，后续tick自动跳过）
+    modules.wasmLoader.initAll();
+
     // 2. 【新增】全局决策AI运行
     modules.developv1.run();
     modules.developv2.run();

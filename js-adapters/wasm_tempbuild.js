@@ -2,34 +2,18 @@
  * js-adapters/wasm_tempbuild.js
  *
  * WASM 版本的 tempbuild 模块适配器
+ * 通过 lib.AP.wasm_loader 同步加载，Screeps 完全兼容
  */
 
-let wasmModule = null;
-let initPromise = null;
+var _loader = null;
 
-async function init() {
-    if (wasmModule) return;
-    if (initPromise) return initPromise;
-
-    initPromise = _doInit().catch(err => {
-        console.error("[WASM-TempBuild] ❌ 加载失败:", err.message);
-        wasmModule = null;
-    }).finally(() => {
-        initPromise = null;
-    });
-
-    return initPromise;
-}
-
-async function _doInit() {
-    const wasmModule_default = await import('../wasm-crates/tempbuild/pkg/screeps_wasm_tempbuild.js');
-    await wasmModule_default.default();
-    wasmModule = wasmModule_default;
-    console.log("[WASM-TempBuild] ✅ 模块加载成功");
+function _getLoader() {
+    if (!_loader) _loader = require('lib.AP.wasm_loader');
+    return _loader;
 }
 
 function isWasmAvailable() {
-    return wasmModule !== null;
+    return _getLoader().isReady('tempbuild');
 }
 
 const wasmTempBuild = {
@@ -41,17 +25,16 @@ const wasmTempBuild = {
      * @returns {Array<{x: number, y: number}>} 采矿位列表
      */
     getMiningSpots: function(x, y, walls) {
-        if (!isWasmAvailable()) {
+        var wasm = _getLoader().tempbuild;
+        if (!wasm) {
             // JS 回退实现（从原始代码提取）
-            const spots = [];
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
+            var spots = [];
+            for (var dx = -1; dx <= 1; dx++) {
+                for (var dy = -1; dy <= 1; dy++) {
                     if (dx === 0 && dy === 0) continue;
-                    const px = x + dx;
-                    const py = y + dy;
+                    var px = x + dx;
+                    var py = y + dy;
                     if (px < 0 || px > 49 || py < 0 || py > 49) continue;
-                    
-                    // 简化版：不检查墙（完整版需要 terrain 数据）
                     spots.push({ x: px, y: py });
                 }
             }
@@ -59,20 +42,21 @@ const wasmTempBuild = {
         }
 
         // 转换为扁平数组格式
-        const wallsFlat = [];
-        for (const wall of (walls || [])) {
-            wallsFlat.push(wall[0]);
-            wallsFlat.push(wall[1]);
+        var wallsFlat = [];
+        for (var i = 0; i < (walls || []).length; i++) {
+            wallsFlat.push(walls[i][0]);
+            wallsFlat.push(walls[i][1]);
         }
 
-        // 调用 WASM 函数（返回 MiningSpot 对象数组）
-        const result = wasmModule.get_mining_spots(x, y, wallsFlat);
-        
+        // 调用 WASM 函数，返回 MiningSpot 对象数组
+        var result = wasm.get_mining_spots(x, y, wallsFlat);
+
         // 转换为标准 JS 格式
-        return result.map(spot => ({ x: spot.x, y: spot.y }));
+        return result.map(function(spot) {
+            return { x: spot.x, y: spot.y };
+        });
     },
 
-    init: init,
     isWasmReady: isWasmAvailable
 };
 
