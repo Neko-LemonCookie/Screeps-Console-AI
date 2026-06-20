@@ -4,31 +4,10 @@
 //!
 //! 编译: cargo build --target wasm32-unknown-unknown --release
 //!
-//! Body Part 编码（单字节，用于共享内存传输）:
+//! Body Part 编码（单字节）:
 //!   0 = move(M), 1 = work(W), 2 = carry(C),
 //!   3 = attack(A), 4 = ranged_attack(R), 5 = claim(K)
-//!
-//! 使用方式（Screeps JS）:
-//!   const buf = require('spawncreep');
-//!   const mod = new WebAssembly.Module(buf);
-//!   const inst = new WebAssembly.Instance(mod, {});
-//!   const e = inst.exports;
-//!   const MEM = new Uint8Array(e.memory.buffer);
-//!   let ptr = e.output_ptr();
-//!   let n = e.get_common_i_body(850);       // 返回部件数量
-//!   let parts = MEM.subarray(ptr, ptr + n); // 读取编码后的部件数组
 
-/// 共享输出缓冲区（JS 通过 output_ptr() 获取地址后读取）
-#[no_mangle]
-pub static OUTPUT_BUF: [u8; 64] = [0; 64];
-
-/// 获取输出缓冲区的内存偏移地址
-#[no_mangle]
-pub extern "C" fn output_ptr() -> i32 {
-    unsafe { OUTPUT_BUF.as_ptr() as i32 }
-}
-
-// === Body Part 常量 ===
 const MOVE: u8 = 0;
 const WORK: u8 = 1;
 const CARRY: u8 = 2;
@@ -36,84 +15,119 @@ const ATTACK: u8 = 3;
 const RANGED_ATTACK: u8 = 4;
 const CLAIM: u8 = 5;
 
-/// 将部件列表写入输出缓冲区，返回数量
-fn write_parts(buf: &mut [u8], parts: &[u8]) -> i32 {
-    let len = parts.len().min(buf.len());
-    buf[..len].copy_from_slice(&parts[..len]);
+/// 共享输出缓冲区（64字节，JS通过output_ptr获取地址后读取）
+#[unsafe(no_mangle)]
+pub static mut OUTPUT_BUF: [u8; 64] = [0; 64];
+
+/// 获取输出缓冲区地址（返回i32指针值，不创建引用）
+#[unsafe(no_mangle)]
+pub extern "C" fn output_ptr() -> i32 {
+    core::ptr::addr_of_mut!(OUTPUT_BUF) as *mut u8 as i32
+}
+
+/// 写入部件到OUTPUT_BUF，返回数量
+fn write_parts(parts: &[u8]) -> i32 {
+    let buf_ptr = core::ptr::addr_of_mut!(OUTPUT_BUF) as *mut u8;
+    let len = parts.len().min(64);
+    unsafe { core::ptr::copy_nonoverlapping(parts.as_ptr(), buf_ptr, len); }
     len as i32
 }
 
 /// 获取 CommonI 型 Creep 部件 → 写入OUTPUT_BUF，返回数量
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn get_common_i_body(energy_available: u32) -> i32 {
-    let parts = match energy_available {
-        850..=u32::MAX => &[WORK,WORK,WORK,WORK, CARRY,CARRY,CARRY,CARRY, MOVE,MOVE,MOVE,MOVE,MOVE],
-        700..=849 => &[WORK,WORK,WORK,WORK, CARRY,CARRY,CARRY, MOVE,MOVE,MOVE,MOVE],
-        600..=699 => &[WORK,WORK,WORK, CARRY,CARRY,CARRY, MOVE,MOVE,MOVE],
-        550..=599 => &[WORK,WORK,WORK, CARRY,CARRY, MOVE,MOVE,MOVE],
-        450..=549 => &[WORK,WORK,WORK, CARRY, MOVE,MOVE],
-        400..=449 => &[WORK,WORK, CARRY,CARRY, MOVE,MOVE],
-        200..=399 => &[WORK, CARRY, MOVE],
-        _ => return 0,
-    };
-    unsafe { write_parts(&mut OUTPUT_BUF.clone(), parts) }
+    const T1: &[u8] = &[WORK,WORK,WORK,WORK, CARRY,CARRY,CARRY,CARRY, MOVE,MOVE,MOVE,MOVE,MOVE];
+    const T2: &[u8] = &[WORK,WORK,WORK,WORK, CARRY,CARRY,CARRY, MOVE,MOVE,MOVE,MOVE];
+    const T3: &[u8] = &[WORK,WORK,WORK, CARRY,CARRY,CARRY, MOVE,MOVE,MOVE];
+    const T4: &[u8] = &[WORK,WORK,WORK, CARRY,CARRY, MOVE,MOVE,MOVE];
+    const T5: &[u8] = &[WORK,WORK,WORK, CARRY, MOVE,MOVE];
+    const T6: &[u8] = &[WORK,WORK, CARRY,CARRY, MOVE,MOVE];
+    const T7: &[u8] = &[WORK, CARRY, MOVE];
+
+    match energy_available {
+        850..=u32::MAX => write_parts(T1),
+        700..=849     => write_parts(T2),
+        600..=699     => write_parts(T3),
+        550..=599     => write_parts(T4),
+        450..=549     => write_parts(T5),
+        400..=449     => write_parts(T6),
+        200..=399     => write_parts(T7),
+        _             => 0,
+    }
 }
 
 /// 获取 CarrierI 型 Creep 部件 → 写入OUTPUT_BUF，返回数量
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn get_carrier_i_body(energy_available: u32) -> i32 {
     const PAIR_COST: u32 = 100;
     const MAX_ENERGY: u32 = 800;
 
     let max_energy = energy_available.min(MAX_ENERGY);
-    let pairs = max_energy / PAIR_COST;
+    let pairs = (max_energy / PAIR_COST) as usize;
+    let total_bytes = pairs * 2;
 
-    let mut parts = Vec::with_capacity((pairs * 2) as usize);
-    for _ in 0..pairs {
-        parts.push(CARRY);
-        parts.push(MOVE);
+    if total_bytes == 0 || total_bytes > 64 { return 0; }
+
+    // 直接写入OUTPUT_BUF的裸指针
+    let buf_ptr = core::ptr::addr_of_mut!(OUTPUT_BUF) as *mut u8;
+    for i in 0..pairs {
+        let off = i * 2;
+        unsafe { *buf_ptr.add(off) = CARRY; }
+        unsafe { *buf_ptr.add(off + 1) = MOVE; }
     }
-
-    unsafe { write_parts(&mut OUTPUT_BUF.clone(), &parts) }
+    total_bytes as i32
 }
 
 /// 获取 AttackerI 型 Creep 部件 → 写入OUTPUT_BUF，返回数量
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn get_attacker_i_body(energy_available: u32) -> i32 {
-    let parts = match energy_available {
-        1180..=u32::MAX => &[ATTACK,ATTACK,ATTACK,ATTACK,ATTACK,ATTACK, RANGED_ATTACK,RANGED_ATTACK,
-                              MOVE,MOVE,MOVE,MOVE,MOVE,MOVE,MOVE,MOVE],
-        980..=1179 => &[ATTACK,ATTACK,ATTACK,ATTACK,ATTACK,ATTACK, RANGED_ATTACK,
-                             MOVE,MOVE,MOVE,MOVE,MOVE,MOVE,MOVE],
-        920..=979 => &[ATTACK,ATTACK,ATTACK,ATTACK, RANGED_ATTACK,RANGED_ATTACK,
-                            MOVE,MOVE,MOVE,MOVE,MOVE,MOVE],
-        780..=919 => &[ATTACK,ATTACK,ATTACK,ATTACK,ATTACK,ATTACK,
-                        MOVE,MOVE,MOVE,MOVE,MOVE,MOVE],
-        390..=779 => &[ATTACK,ATTACK,ATTACK, MOVE,MOVE,MOVE],
-        _ => return 0,
-    };
-    unsafe { write_parts(&mut OUTPUT_BUF.clone(), parts) }
+    const T1: &[u8] = &[
+        ATTACK,ATTACK,ATTACK,ATTACK,ATTACK,ATTACK,
+        RANGED_ATTACK,RANGED_ATTACK,
+        MOVE,MOVE,MOVE,MOVE,MOVE,MOVE,MOVE,MOVE,
+    ];
+    const T2: &[u8] = &[
+        ATTACK,ATTACK,ATTACK,ATTACK,ATTACK,ATTACK,
+        RANGED_ATTACK,
+        MOVE,MOVE,MOVE,MOVE,MOVE,MOVE,MOVE,
+    ];
+    const T3: &[u8] = &[
+        ATTACK,ATTACK,ATTACK,ATTACK,
+        RANGED_ATTACK,RANGED_ATTACK,
+        MOVE,MOVE,MOVE,MOVE,MOVE,MOVE,
+    ];
+    const T4: &[u8] = &[
+        ATTACK,ATTACK,ATTACK,ATTACK,ATTACK,ATTACK,
+        MOVE,MOVE,MOVE,MOVE,MOVE,MOVE,
+    ];
+    const T5: &[u8] = &[ATTACK,ATTACK,ATTACK, MOVE,MOVE,MOVE];
+
+    match energy_available {
+        1180..=u32::MAX => write_parts(T1),
+        980..=1179     => write_parts(T2),
+        920..=979      => write_parts(T3),
+        780..=919      => write_parts(T4),
+        390..=779      => write_parts(T5),
+        _              => 0,
+    }
 }
 
 /// 获取 ClaimerI 型 Creep 部件 → 写入OUTPUT_BUF，返回数量
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn get_claimer_i_body(energy_available: u32) -> i32 {
-    let parts = match energy_available {
-        1300..=u32::MAX => &[CLAIM, CLAIM, MOVE, MOVE],
-        650..=1299 => &[CLAIM, MOVE],
-        _ => return 0,
-    };
-    unsafe { write_parts(&mut OUTPUT_BUF.clone(), parts) }
+    const T1: &[u8] = &[CLAIM, CLAIM, MOVE, MOVE];
+    const T2: &[u8] = &[CLAIM, MOVE];
+
+    match energy_available {
+        1300..=u32::MAX => write_parts(T1),
+        650..=1299      => write_parts(T2),
+        _               => 0,
+    }
 }
 
 /// 计算部件列表总能量消耗
-///
-/// # Arguments
-/// * `parts_ptr` - 部件编码数组的内存指针（由JS传入）
-/// * `parts_len` - 数组长度
-///
-/// # Returns 总能量消耗
-#[no_mangle]
+/// parts_ptr: 部件编码数组内存指针, parts_len: 数组长度
+#[unsafe(no_mangle)]
 pub extern "C" fn calc_body_cost(parts_ptr: i32, parts_len: i32) -> u32 {
     const COST_MAP: [u32; 6] = [50, 100, 50, 80, 150, 600]; // M,W,C,A,R,K
 
