@@ -4,6 +4,8 @@
  * 参数：sourceId (Source/Mineral), targetId (ID/'base'/'ground')
  */
 
+const taskHelper = require('lib.AP.taskHelper');
+
 const taskHarvest = {
     /**
      * @param {Creep} creep 
@@ -12,15 +14,15 @@ const taskHarvest = {
         const data = creep.memory.taskData;
         if (!data || !data.sourceId || !data.targetId) return;
 
-        // 0. 强化 (Boost) 检查：如果房间内有 WORK 强化任务，且自身 TTL 足够，则转换任务
+        // 0. 强化 (Boost) 检查：如果房间内有 work 强化任务，且自身 TTL 足够，则转换任务
         if (creep.ticksToLive > 1200) {
             const buildingTasks = (Memory.Taskboard && Memory.Taskboard.Task.Buildings[creep.room.name]) || [];
-            const boostWorkTask = buildingTasks.find(t => t.type === 'boost' && t.data.bodyPart === 'WORK');
+            // 统一使用 'work' 小写，与 taskboard.buildings.boost 创建时一致
+            const boostWorkTask = buildingTasks.find(t => t.type === 'boost' && t.data && t.data.bodyPart === 'work');
             
             // 只要建筑任务已被 Lab 领取（takenBy 为 Lab ID），直接使用该 ID
             if (boostWorkTask && boostWorkTask.takenBy && boostWorkTask.takenBy !== 'LabGroup') {
                 const targetLabId = boostWorkTask.takenBy;
-                
                 // 转换任务：先清理旧任务，再添加新任务并锁定
                 const taskboard = require('lib.AP.taskboard');
                 taskboard.removeTask(creep.room.name, 'Creeps', creep.name);
@@ -67,7 +69,7 @@ const taskHarvest = {
         if (!source) {
             console.log("[Harvest] ❌ 找不到能量源: " + sourceId + " (Creep: " + creep.name + ")");
             // 找不到能量源，强制结束任务
-            this._completeTask(creep);
+            taskHelper.completeTask(creep);
             return;
         }
 
@@ -85,7 +87,7 @@ const taskHarvest = {
     },
 
     /**
-     * 存储逻辑
+     * 存储逻辑（智能选择目标：优先Container/Link，其次base/Storage）
      * @private
      */
     _deposit: function(creep, targetId) {
@@ -94,82 +96,93 @@ const taskHarvest = {
             for (const resourceType in creep.store) {
                 creep.drop(resourceType);
             }
-            // 任务结束：丢弃后即算完成循环
-            this._completeTask(creep);
+            taskHelper.completeTask(creep);
             return;
         }
 
-        // 2. 特殊目标：base (Spawn + Extension)
+        // 2. 【新增】智能目标查找：优先找Source附近的Container/Link
+        var source = Game.getObjectById(creep.memory.taskData.sourceId);
+        var smartTarget = null;
+
+        if (source) {
+            // 查找Source旁边2格范围内的Container或Link
+            var nearbyStructures = source.pos.findInRange(FIND_STRUCTURES, 2);
+            for (var ni = 0; ni < nearbyStructures.length; ni++) {
+                var ns = nearbyStructures[ni];
+                if ((ns.structureType === STRUCTURE_CONTAINER || ns.structureType === STRUCTURE_LINK) &&
+                    ns.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+                    smartTarget = ns;
+                    break;  // 找到一个就够了
+                }
+            }
+        }
+
+        // 3. 如果找到了附近的Container/Link，往里存
+        if (smartTarget) {
+            var result = creep.transfer(smartTarget, RESOURCE_ENERGY);
+            if (result === ERR_NOT_IN_RANGE) {
+                creep.moveTo(smartTarget, { visualizePathStyle: { stroke: '#00ff00' } });
+            } else if (result === OK) {
+                // 存入容器后不清除任务！继续采矿循环（working状态切换回false后会继续采）
+                creep.memory.working = false;
+                creep.say('⚡ 采集');
+            }
+            return;
+        }
+
+        // 4. 没有容器时的原有逻辑：送往base或指定目标
         if (targetId === 'base') {
-            const target = creep.pos.findClosestByPath(FIND_STRUCTURES, {
-                filter: (s) => {
+            var target = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+                filter: function(s) {
                     return (s.structureType === STRUCTURE_EXTENSION || s.structureType === STRUCTURE_SPAWN) &&
                            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0;
                 }
             });
             if (target) {
-                const result = creep.transfer(target, RESOURCE_ENERGY);
-                if (result === ERR_NOT_IN_RANGE) {
+                var result2 = creep.transfer(target, RESOURCE_ENERGY);
+                if (result2 === ERR_NOT_IN_RANGE) {
                     creep.moveTo(target, { visualizePathStyle: { stroke: '#ffffff' } });
-                } else if (result === OK) {
-                    // 转移成功后完成任务
-                    this._completeTask(creep);
+                } else if (result2 === OK) {
+                    taskHelper.completeTask(creep);
                 }
             } else {
-                // 如果 base 满了，临时寻找最近的存储建筑
-                const fallback = creep.pos.findClosestByPath(FIND_STRUCTURES, {
-                    filter: (s) => {
-                        return (s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_STORAGE) &&
+                // base满了，找Storage/Container
+                var fallback = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+                    filter: function(s) {
+                        return (s.structureType === STRUCTURE_CONTAINER ||
+                                s.structureType === STRUCTURE_STORAGE ||
+                                s.structureType === STRUCTURE_LINK) &&
                                s.store.getFreeCapacity(RESOURCE_ENERGY) > 0;
                     }
                 });
                 if (fallback) {
-                    const result = creep.transfer(fallback, RESOURCE_ENERGY);
-                    if (result === ERR_NOT_IN_RANGE) {
+                    var result3 = creep.transfer(fallback, RESOURCE_ENERGY);
+                    if (result3 === ERR_NOT_IN_RANGE) {
                         creep.moveTo(fallback, { visualizePathStyle: { stroke: '#ffffff' } });
-                    } else if (result === OK) {
-                        // 转移成功后完成任务
-                        this._completeTask(creep);
+                    } else if (result3 === OK) {
+                        taskHelper.completeTask(creep);
                     }
                 }
             }
             return;
         }
 
-        // 3. 指定 ID 目标 (Container, Storage, LINK, etc.)
-        const target = Game.getObjectById(targetId);
-        if (!target) {
+        // 5. 指定ID目标
+        var idTarget = Game.getObjectById(targetId);
+        if (!idTarget) {
             console.log("[Harvest] ❌ 找不到存储目标: " + targetId + " (Creep: " + creep.name + ")");
-            // 找不到目标，强制结束任务
-            this._completeTask(creep);
+            taskHelper.completeTask(creep);
             return;
         }
 
-        const result = creep.transfer(target, RESOURCE_ENERGY);
-        if (result === ERR_NOT_IN_RANGE) {
-            creep.moveTo(target, { visualizePathStyle: { stroke: '#ffffff' } });
-        } else if (result === OK) {
-            // 转移成功后完成任务
-            this._completeTask(creep);
+        var result4 = creep.transfer(idTarget, RESOURCE_ENERGY);
+        if (result4 === ERR_NOT_IN_RANGE) {
+            creep.moveTo(idTarget, { visualizePathStyle: { stroke: '#ffffff' } });
+        } else if (result4 === OK) {
+            taskHelper.completeTask(creep);
         }
     },
 
-    /**
-     * 任务完成并自清理
-     * @private
-     */
-    _completeTask: function(creep) {
-        const taskboard = require('lib.AP.taskboard');
-        const taskRoom = creep.memory.taskRoom || creep.room.name;
-        // 使用更新后的 removeTask API，传入 creep.name 进行精准删除
-        taskboard.removeTask(taskRoom, 'Creeps', creep.name);
-        
-        // 清理自身内存
-        creep.memory.taskType = null;
-        creep.memory.taskData = null;
-        creep.memory.taskRoom = null;
-        creep.memory.working = false;
-    }
 };
 
 module.exports = taskHarvest;

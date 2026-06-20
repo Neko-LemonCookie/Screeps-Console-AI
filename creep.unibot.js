@@ -128,14 +128,16 @@ const unibot = {
     _assignTask: function(creep, task, roomName, index) {
         // 标记任务已被领取 (内存锁定)
         task.takenBy = creep.name;
-        
+
         // 更新 Creep 内存
         creep.memory.taskType = task.type;
         creep.memory.taskData = task.data;
         creep.memory.taskRoom = roomName;
         creep.memory.taskIndex = index; // 记录索引方便后续可能的同步
 
-        console.log("[" + roomName + "] 📥 Creep " + creep.name + " (" + creep.memory.model + ") 领受任务: " + task.type);
+        if (typeof DEBUG_LOG !== 'undefined' && DEBUG_LOG) {
+            console.log("[" + roomName + "] 📥 Creep " + creep.name + " (" + creep.memory.model + ") 领受任务: " + task.type);
+        }
     }
 };
 

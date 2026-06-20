@@ -69,10 +69,10 @@ const buildingSpawn = {
             bestTask.takenBy = spawn.name;
 
             const result = spawncreep.spawn(spawn, bestTask.data.model, bestTask.data.energy);
-            
+
             if (result === OK) {
-                // 5. 生成后在内存中删除该任务
-                taskboard.removeTask(roomName, 'Buildings', bestTaskIndex);
+                // 5. 生成后在内存中删除该任务（使用 takenBy 精准删除，避免索引漂移）
+                taskboard.removeTask(roomName, 'Buildings', spawn.name);
             } else {
                 // 如果生成失败，重置标记并输出错误信息
                 bestTask.takenBy = null;

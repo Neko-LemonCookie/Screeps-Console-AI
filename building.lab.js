@@ -57,6 +57,8 @@ module.exports = {
             // 3.2 如果有 Boost 任务，执行 Boost 逻辑并跳过该组的反应逻辑
             if (activeTask) {
                 const labId = outputLab.id;
+                // 初始化房间内存（防止未初始化导致崩溃）
+                if (!Memory.rooms[room.name]) Memory.rooms[room.name] = {};
                 // 初始化或获取计时器 (每个反应 LAB 独立计时)
                 if (!Memory.rooms[room.name].labBoostTimers) Memory.rooms[room.name].labBoostTimers = {};
                 if (Memory.rooms[room.name].labBoostTimers[labId] === undefined) {
@@ -127,7 +129,13 @@ module.exports = {
             // 3.3 自动反应逻辑 (无 Boost 任务时执行)
             if (outputLab.cooldown > 0) continue;
 
-            const pairInputs = this._getPairInputs(outputLab, inputLabs, center);
+            // 获取城市中心坐标（_getPairInputs 需要）
+            const centerPos = room.memory.cityCenter
+                ? new RoomPosition(room.memory.cityCenter.x, room.memory.cityCenter.y, room.name)
+                : null;
+            if (!centerPos) continue;
+
+            const pairInputs = this._getPairInputs(outputLab, inputLabs, centerPos);
             if (pairInputs.length === 2) {
                 const lab1 = pairInputs[0];
                 const lab2 = pairInputs[1];

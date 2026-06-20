@@ -4,6 +4,8 @@
  * 参数：targetRoomName, signText
  */
 
+const taskHelper = require('lib.AP.taskHelper');
+
 const taskSign = {
     /**
      * @param {Creep} creep 
@@ -31,31 +33,15 @@ const taskSign = {
         if (result === ERR_NOT_IN_RANGE) {
             creep.moveTo(controller, { visualizePathStyle: { stroke: '#ffffff' } });
         } else if (result === OK) {
-            this._completeTask(creep);
+            taskHelper.completeTask(creep);
         } else {
             // 如果签名已经一致，也算完成
             if (controller.sign && controller.sign.text === data.signText) {
-                this._completeTask(creep);
+                taskHelper.completeTask(creep);
             }
         }
     },
 
-    /**
-     * 任务完成并自清理
-     * @private
-     */
-    _completeTask: function(creep) {
-        const taskboard = require('lib.AP.taskboard');
-        const taskRoom = creep.memory.taskRoom || creep.room.name;
-        // 使用更新后的 removeTask API，传入 creep.name 进行精准删除
-        taskboard.removeTask(taskRoom, 'Creeps', creep.name);
-        
-        // 清理自身内存
-        creep.memory.taskType = null;
-        creep.memory.taskData = null;
-        creep.memory.taskRoom = null;
-        creep.memory.working = false;
-    }
 };
 
 module.exports = taskSign;

@@ -4,6 +4,8 @@
  * 参数：targetRoomName, sourceId
  */
 
+const taskHelper = require('lib.AP.taskHelper');
+
 const taskClaimBuild = {
     /**
      * @param {Creep} creep 
@@ -22,7 +24,7 @@ const taskClaimBuild = {
         // 任务结束判定：目标房间有 spawn 后任务结束
         const spawns = creep.room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_SPAWN });
         if (spawns.length > 0) {
-            this._completeTask(creep);
+            taskHelper.completeTask(creep);
             return;
         }
 
@@ -62,22 +64,6 @@ const taskClaimBuild = {
         }
     },
 
-    /**
-     * 任务完成并自清理
-     * @private
-     */
-    _completeTask: function(creep) {
-        const taskboard = require('lib.AP.taskboard');
-        const taskRoom = creep.memory.taskRoom || creep.room.name;
-        // 使用更新后的 removeTask API，传入 creep.name 进行精准删除
-        taskboard.removeTask(taskRoom, 'Creeps', creep.name);
-        
-        // 清理自身内存
-        creep.memory.taskType = null;
-        creep.memory.taskData = null;
-        creep.memory.taskRoom = null;
-        creep.memory.working = false;
-    }
 };
 
 module.exports = taskClaimBuild;

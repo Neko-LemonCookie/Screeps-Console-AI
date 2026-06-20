@@ -4,6 +4,8 @@
  * 参数：fromRoom, toRoom, fromId, toId, resourceType
  */
 
+const taskHelper = require('lib.AP.taskHelper');
+
 const taskGlobalCarry = {
     /**
      * @param {Creep} creep 
@@ -14,7 +16,7 @@ const taskGlobalCarry = {
 
         // 状态切换：完成一次跨房间搬运循环（清空背包）则结束任务
         if (creep.memory.working && creep.store.getUsedCapacity() === 0) {
-            this._completeTask(creep);
+            taskHelper.completeTask(creep);
             return;
         }
         if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
@@ -53,22 +55,6 @@ const taskGlobalCarry = {
         }
     },
 
-    /**
-     * 任务完成并自清理
-     * @private
-     */
-    _completeTask: function(creep) {
-        const taskboard = require('lib.AP.taskboard');
-        const taskRoom = creep.memory.taskRoom || creep.room.name;
-        // 使用更新后的 removeTask API，传入 creep.name 进行精准删除
-        taskboard.removeTask(taskRoom, 'Creeps', creep.name);
-        
-        // 清理自身内存
-        creep.memory.taskType = null;
-        creep.memory.taskData = null;
-        creep.memory.taskRoom = null;
-        creep.memory.working = false;
-    }
 };
 
 module.exports = taskGlobalCarry;

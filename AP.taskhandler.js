@@ -11,6 +11,9 @@ const APTaskhandler = {
      * 运行任务处理器
      */
     run: function() {
+        // 【Phase 3】处理Strategy任务（决策层→执行层转换）
+        this._processStrategyTasks();
+
         // 0. 自动创建 build 任务
         this._autoCreateBuildTasks();
         
@@ -42,6 +45,171 @@ const APTaskhandler = {
     },
 
     /**
+     * 【新增】处理Strategy任务（决策层→执行层转换）
+     * @private
+     */
+    _processStrategyTasks: function() {
+        if (!Memory.Taskboard?.Task?.Strategy) return;
+        
+        const taskboard = require('lib.AP.taskboard');
+        
+        for (const roomName in Memory.Taskboard.Task.Strategy) {
+            const tasks = Memory.Taskboard.Task.Strategy[roomName];
+            if (!Array.isArray(tasks)) continue;
+            
+            // 倒序遍历以便安全删除
+            for (let i = tasks.length - 1; i >= 0; i--) {
+                const task = tasks[i];
+                
+                // 跳过已处理的任务
+                if (task.takenBy) continue;
+                
+                // 根据任务类型分发处理
+                switch (task.type) {
+                    case 'need_creeps':
+                        this._handleNeedCreeps(taskboard, roomName, task);
+                        break;
+                        
+                    case 'market_action':
+                        this._handleMarketAction(taskboard, roomName, task);
+                        break;
+                        
+                    case 'lab_production':
+                        this._handleLabProduction(taskboard, roomName, task);
+                        break;
+                        
+                    default:
+                        console.warn("[TaskHandler] ⚠️ 未知的Strategy任务类型: " + task.type);
+                }
+                
+                // 标记为已处理
+                task.takenBy = 'taskhandler';
+            }
+            
+            // 【新增】清理已处理的过期Strategy任务（防止内存泄漏）
+            // 保留最近500tick的任务用于调试，更早的删除
+            const now = Game.time;
+            Memory.Taskboard.Task.Strategy[roomName] = tasks.filter(function(task) {
+                if (!task.takenBy) return true;  // 未处理的保留
+                if (!task.createdTime) return true;  // 无时间戳的保留（异常保护）
+                return (now - task.createdTime) < 500;  // 500tick内的保留，超时删除
+            });
+        }
+    },
+
+    /**
+     * 【新增】处理Creep需求：转换为具体的Spawn任务
+     * @param {Object} taskboard Taskboard实例
+     * @param {string} roomName 房间名
+     * @param {Object} strategyTask Strategy任务对象
+     * @private
+     */
+    _handleNeedCreeps: function(taskboard, roomName, strategyTask) {
+        const model = strategyTask.data?.model;
+        const count = strategyTask.data?.count;
+        const priority = strategyTask.data?.priority || 'harvest';
+
+        if (!model || !count || count <= 0) return;
+
+        // 统计当前该型号的Creep数量
+        const currentCount = this._countCreepsByModel(roomName, model);
+        const deficit = count - currentCount;
+
+        if (deficit <= 0) return;  // 已满足需求
+
+        // 【关键修复】将bodySize转换为实际能量值（Strategy用bodySize描述，spawn需要具体energy数值）
+        const room = Game.rooms[roomName];
+        const bodySize = strategyTask.data?.data?.bodySize || 'medium';
+        const energy = this._resolveEnergy(bodySize, room);
+
+        // 转换为Spawn任务发布到Buildings类别（每次最多3个避免爆发）
+        const spawnCount = Math.min(deficit, 3);
+        for (let i = 0; i < spawnCount; i++) {
+            taskboard.buildings.spawn(
+                roomName,
+                model,
+                priority,
+                {
+                    energy: energy,                    // ← 关键：传递实际能量值给spawncreep
+                    model: model,
+                    enableBoost: strategyTask.data?.data?.enableBoost || false,
+                    boostResource: strategyTask.data?.data?.boostResource || null
+                }
+            );
+        }
+
+        if (Game.time % 100 === 0) {
+            console.log("[TaskHandler] 🔄 Strategy→Spawn: 需要" + count + "个" + model +
+                       ", 当前" + currentCount + "个, 实际孵化+" + spawnCount +
+                       " (energy=" + energy + ", bodySize=" + bodySize + ")");
+        }
+    },
+
+    /**
+     * 【新增】将bodySize字符串转换为实际能量值
+     * small=450(4part基础体) medium=700(6part) large=850(8part) max=房间容量上限
+     * @private
+     */
+    _resolveEnergy: function(bodySize, room) {
+        const sizeMap = {
+            'small': 450,
+            'medium': 700,
+            'large': 850,
+            'max': room ? room.energyCapacityAvailable : 800
+        };
+        return sizeMap[bodySize] || 550;  // 默认medium
+    },
+
+    /**
+     * 【新增】统计指定房间内指定型号的Creep数量
+     * @param {string} roomName 房间名
+     * @param {string} model Creep型号
+     * @returns {number} 数量
+     * @private
+     */
+    _countCreepsByModel: function(roomName, model) {
+        let count = 0;
+        
+        if (Game.rooms[roomName]) {
+            const creeps = Game.rooms[roomName].find(FIND_MY_CREEPS);
+            for (const creep of creeps) {
+                if (creep.memory.model === model) count++;
+            }
+        }
+        
+        return count;
+    },
+
+    /**
+     * 【新增】处理市场操作需求
+     * @private
+     */
+    _handleMarketAction: function(taskboard, roomName, task) {
+        if (typeof ENABLE_MARKET !== 'undefined' && !ENABLE_MARKET) return;
+        
+        const action = task.data?.action;
+        const resource = task.data?.resource;
+        const amount = task.data?.amount;
+        
+        console.log("[TaskHandler] 🏷️ 市场操作请求: " + action + " " + amount + " " + resource + 
+                   " in " + roomName);
+        // 具体市场操作由buildingTerminal或market模块执行
+    },
+
+    /**
+     * 【新增】处理Lab生产需求
+     * @private
+     */
+    _handleLabProduction: function(taskboard, roomName, task) {
+        const compound = task.data?.compound;
+        const targetAmount = task.data?.targetAmount;
+        
+        console.log("[TaskHandler] 🧪 Lab生产请求: 生产 " + targetAmount + " " + compound + 
+                   " in " + roomName);
+        // 具体生产由building.lab.js或独立lab管理模块执行
+    },
+
+    /**
      * 自动创建 build 任务
      * @private
      */
@@ -55,7 +223,7 @@ const APTaskhandler = {
             if (!siteIds || siteIds.length === 0) continue;
             
             // 检查是否已经有 build 任务
-            const existingBuildTasks = (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task.Creeps && Memory.Taskboard.Task.Creeps[roomName]) || [];
+            const existingBuildTasks = modules.taskboard.getTasks(roomName, 'Creeps');
             const existingEnergySources = new Set();
             
             for (const task of existingBuildTasks) {
@@ -67,9 +235,13 @@ const APTaskhandler = {
             // 按照优先级查找能量来源
             const energySources = this._findEnergySourcesByPriority(room);
             
-            // 为每个能量来源创建 build 任务
+            // 为每个能量来源创建 build 任务（优先选择存储和容器，避免使用终端和市场相关资源）
             for (const sourceId of energySources) {
                 if (!existingEnergySources.has(sourceId)) {
+                    // 检查是否是终端，如果是则跳过（终端能量应保留用于市场）
+                    const sourceObj = Game.getObjectById(sourceId);
+                    if (sourceObj && sourceObj.structureType === STRUCTURE_TERMINAL) continue;
+
                     modules.taskboard.creeps.build(roomName, sourceId);
                     // 每个能量来源只创建一个 build 任务
                     break;
@@ -113,16 +285,17 @@ const APTaskhandler = {
             filter: r => r.resourceType === RESOURCE_ENERGY && r.amount > 0
         });
         if (droppedEnergy.length > 0) {
-            // 选择最近的一个
-            const creep = Game.creeps[Object.keys(Game.creeps)[0]];
-            if (creep) {
-                const closestEnergy = creep.pos.findClosestByPath(droppedEnergy);
-                if (closestEnergy) {
-                    // 地板能量没有 ID，使用 Source 代替
-                    const sourcesInRoom = room.find(FIND_SOURCES);
-                    if (sourcesInRoom.length > 0) {
-                        sources.push(sourcesInRoom[0].id);
-                    }
+            // 取离散落能量最近的 Source 作为代理（散落能量无独立ID）
+            const nearestToDropped = room.find(FIND_SOURCES, {
+                filter: s => s.pos.findInRange(droppedEnergy, 3).length > 0
+            });
+            if (nearestToDropped.length > 0) {
+                sources.push(nearestToDropped[0].id);
+            } else {
+                // 兜底：取房间内任意一个Source
+                const sourcesInRoom = room.find(FIND_SOURCES);
+                if (sourcesInRoom.length > 0) {
+                    sources.push(sourcesInRoom[0].id);
                 }
             }
         }
@@ -156,7 +329,7 @@ const APTaskhandler = {
             const needs = [];
             
             // 获取该房间的所有 Creeps 任务
-            const tasks = (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task.Creeps && Memory.Taskboard.Task.Creeps[roomName]) || [];
+            const tasks = modules.taskboard.getTasks(roomName, 'Creeps');
             if (!Array.isArray(tasks)) continue;
             
             // 统计任务数量
@@ -230,46 +403,43 @@ const APTaskhandler = {
         const validCreeps = {};
         const room = Game.rooms[roomName];
         if (!room) return validCreeps;
-        
-        // 1. 统计当前房间内的有效 creep
-        for (const name in Game.creeps) {
-            const creep = Game.creeps[name];
-            if (creep.room.name !== roomName) continue;
-            
+
+        // 1. 统计当前房间内的有效 creep（仅遍历本房间，不全局扫描）
+        const roomCreeps = room.find(FIND_MY_CREEPS);
+        const longTermTasks = ['harvest', 'upgrade', 'attack', 'police', 'globalcarry', 'claim', 'claimupgrade', 'claimbuild'];
+
+        for (const creep of roomCreeps) {
             const taskType = creep.memory.taskType;
             const model = creep.memory.model;
-            
-            // 长期任务或离开房间的 creep 不视为有效
-            const longTermTasks = ['harvest', 'upgrade', 'attack', 'police', 'globalcarry', 'claim', 'claimupgrade', 'claimbuild'];
+
+            // 长期任务的 creep 不视为可调度资源
             if (longTermTasks.includes(taskType)) continue;
-            
-            // 接了任务或没接任务的 creep 都算为有效
+
             if (!taskType || taskType === 'unibot') {
-                // 没接任务的 creep，根据型号分配
+                // 没接任务的 creep，根据型号分配潜在能力
                 if (model === 'CommonI') {
-                    if (!validCreeps['harvest']) validCreeps['harvest'] = 0;
-                    if (!validCreeps['upgrade']) validCreeps['upgrade'] = 0;
-                    if (!validCreeps['repair']) validCreeps['repair'] = 0;
-                    if (!validCreeps['build']) validCreeps['build'] = 0;
-                    if (!validCreeps['carry']) validCreeps['carry'] = 0;
+                    validCreeps['harvest'] = (validCreeps['harvest'] || 0);
+                    validCreeps['upgrade'] = (validCreeps['upgrade'] || 0);
+                    validCreeps['repair'] = (validCreeps['repair'] || 0);
+                    validCreeps['build'] = (validCreeps['build'] || 0);
+                    validCreeps['carry'] = (validCreeps['carry'] || 0);
                 } else if (model === 'CarrierI') {
-                    if (!validCreeps['carry']) validCreeps['carry'] = 0;
+                    validCreeps['carry'] = (validCreeps['carry'] || 0);
                 } else if (model === 'AttackerI') {
-                    if (!validCreeps['police']) validCreeps['police'] = 0;
-                    if (!validCreeps['attack']) validCreeps['attack'] = 0;
+                    validCreeps['police'] = (validCreeps['police'] || 0);
+                    validCreeps['attack'] = (validCreeps['attack'] || 0);
                 } else if (model === 'ClaimerI') {
-                    if (!validCreeps['claim']) validCreeps['claim'] = 0;
-                    if (!validCreeps['reserve']) validCreeps['reserve'] = 0;
+                    validCreeps['claim'] = (validCreeps['claim'] || 0);
+                    validCreeps['reserve'] = (validCreeps['reserve'] || 0);
                 }
             } else {
-                // 接了任务的 creep，根据任务类型统计
-                if (!validCreeps[taskType]) validCreeps[taskType] = 0;
-                validCreeps[taskType]++;
+                // 接了任务的 creep，按任务类型统计
+                validCreeps[taskType] = (validCreeps[taskType] || 0) + 1;
             }
         }
         
         // 2. 统计正在等待的 spawn 任务，避免重复生成
-        const existingSpawnTasks = (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task.Buildings && Memory.Taskboard.Task.Buildings[roomName]) || [];
+        const existingSpawnTasks = modules.taskboard.getTasks(roomName, 'Buildings');
         const waitingSpawnTasks = existingSpawnTasks.filter(t => t.type === 'spawn' && !t.takenBy);
         
         for (const task of waitingSpawnTasks) {
@@ -396,8 +566,8 @@ const APTaskhandler = {
         };
         energy = Math.max(energy, minEnergyRequirements[model] || 200);
         
-        // 发布 spawn 任务
-        modules.taskboard.buildings.spawn(room.name, model, energy);
+        // 发布 spawn 任务（4参数版本：roomName, model, priority, data）
+        modules.taskboard.buildings.spawn(room.name, model, need.priority, { energy: energy, model: model });
     },
 
     /**
@@ -419,7 +589,7 @@ const APTaskhandler = {
             if (!storage) continue;
 
             // 检查是否已有能量运输任务
-            const tasks = (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task.Creeps && Memory.Taskboard.Task.Creeps[roomName]) || [];
+            const tasks = modules.taskboard.getTasks(roomName, 'Creeps');
             const hasEnergyTransport = tasks.some(t => t.type === 'carry' && t.data.toId === terminal.id);
 
             // 如果存储内能量 > 80000 且没有能量运输任务，建立 carry 任务
@@ -483,8 +653,8 @@ const APTaskhandler = {
      * @private
      */
     _setupFactoryProduction: function(roomName, storage, factory, terminal, mineralType) {
-        const tasks = (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task.Creeps && Memory.Taskboard.Task.Creeps[roomName]) || [];
-        const buildingTasks = (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task.Buildings && Memory.Taskboard.Task.Buildings[roomName]) || [];
+        const tasks = modules.taskboard.getTasks(roomName, 'Creeps');
+        const buildingTasks = modules.taskboard.getTasks(roomName, 'Buildings');
         
         // 检查是否已有相关的 carry 任务
         const hasEnergyCarry = tasks.some(t => t.type === 'carry' && t.data.toId === factory.id);
@@ -568,14 +738,14 @@ const APTaskhandler = {
     _getFactoryProduct: function(mineralType) {
         const productMap = {
             'O': 'oxidant',
-            'L': 'purifier',
-            'K': 'purifier',
-            'Z': 'purifier',
+            'L': 'utrium_bar',
+            'K': 'lemergium_bar',
+            'Z': 'zynthium_bar',
             'U': 'reductant',
-            'H': 'purifier',
-            'X': 'purifier'
+            'H': 'hydrogen_bar',
+            'X': 'composite_bar'
         };
-        return productMap[mineralType] || 'purifier';
+        return productMap[mineralType] || 'composite_bar';
     },
 
     /**
@@ -618,8 +788,8 @@ const APTaskhandler = {
             if (!labGroups || labGroups.length === 0) continue;
 
             // 获取现有任务
-            const tasks = (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task.Creeps && Memory.Taskboard.Task.Creeps[roomName]) || [];
-            const buildingTasks = (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task.Buildings && Memory.Taskboard.Task.Buildings[roomName]) || [];
+            const tasks = modules.taskboard.getTasks(roomName, 'Creeps');
+            const buildingTasks = modules.taskboard.getTasks(roomName, 'Buildings');
 
             // ========== 第一组 LAB：UO 反应 ==========
             this._handleUOLabReaction(roomName, room, storage, terminal, labGroups[0], tasks, buildingTasks);
@@ -679,19 +849,19 @@ const APTaskhandler = {
             if (!hasOTransport) {
                 modules.taskboard.creeps.carry(roomName, storage.id, inputLab1.id, 'O');
                 // 标记为 LAB 反应任务
-                const newTasks = (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task.Creeps && Memory.Taskboard.Task.Creeps[roomName]) || [];
+                const newTasks = modules.taskboard.getTasks(roomName, 'Creeps');
                 const newTask = newTasks[newTasks.length - 1];
                 if (newTask) newTask.data.isLabReaction = true;
             }
             if (!hasUTransport) {
                 modules.taskboard.creeps.carry(roomName, storage.id, inputLab2.id, 'U');
-                const newTasks = (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task.Creeps && Memory.Taskboard.Task.Creeps[roomName]) || [];
+                const newTasks = modules.taskboard.getTasks(roomName, 'Creeps');
                 const newTask = newTasks[newTasks.length - 1];
                 if (newTask) newTask.data.isLabReaction = true;
             }
             if (!hasEnergyTransport) {
                 modules.taskboard.creeps.carry(roomName, storage.id, outputLab.id, RESOURCE_ENERGY);
-                const newTasks = (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task.Creeps && Memory.Taskboard.Task.Creeps[roomName]) || [];
+                const newTasks = modules.taskboard.getTasks(roomName, 'Creeps');
                 const newTask = newTasks[newTasks.length - 1];
                 if (newTask) newTask.data.isLabReaction = true;
             }

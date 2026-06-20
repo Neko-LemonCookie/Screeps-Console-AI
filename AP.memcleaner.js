@@ -31,7 +31,7 @@ const APMemcleaner = {
     _initMemory: function() {
         // 任务看板初始化
         if (!Memory.Taskboard) Memory.Taskboard = {};
-        if (!Memory.Taskboard.Task) Memory.Taskboard.Task = { Creeps: {}, Buildings: {} };
+        if (!Memory.Taskboard.Task) Memory.Taskboard.Task = { Creeps: {}, Buildings: {}, Strategy: {} };
 
         // 自动市场初始化
         if (!Memory.AutoMarket) {

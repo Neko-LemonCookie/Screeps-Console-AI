@@ -5,6 +5,7 @@
  */
 
 const modules = require('module.references');
+const taskHelper = require('lib.AP.taskHelper');
 
 const taskBuild = {
     /**
@@ -33,7 +34,7 @@ const taskBuild = {
                 }
             } else {
                 // 如果没有工地了，说明建造任务完全完成
-                this._completeTask(creep);
+                taskHelper.completeTask(creep);
             }
         } else {
             // 从指定目标获取能量
@@ -201,22 +202,6 @@ const taskBuild = {
         return bestSite;
     },
 
-    /**
-     * 任务完成并自清理
-     * @private
-     */
-    _completeTask: function(creep) {
-        const taskboard = require('lib.AP.taskboard');
-        const taskRoom = creep.memory.taskRoom || creep.room.name;
-        // 使用更新后的 removeTask API，传入 creep.name 进行精准删除
-        taskboard.removeTask(taskRoom, 'Creeps', creep.name);
-        
-        // 清理自身内存
-        creep.memory.taskType = null;
-        creep.memory.taskData = null;
-        creep.memory.taskRoom = null;
-        creep.memory.working = false;
-    }
 };
 
 module.exports = taskBuild;

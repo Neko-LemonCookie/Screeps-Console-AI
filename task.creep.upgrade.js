@@ -4,6 +4,8 @@
  * 参数：targetId (能量来源建筑 ID 或 Source ID)
  */
 
+const taskHelper = require('lib.AP.taskHelper');
+
 const taskUpgrade = {
     /**
      * @param {Creep} creep 
@@ -14,7 +16,7 @@ const taskUpgrade = {
 
         // 状态切换：完成一次升级循环（背包空）则结束任务
         if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
-            this._completeTask(creep);
+            taskHelper.completeTask(creep);
             return;
         }
         if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
@@ -42,7 +44,8 @@ const taskUpgrade = {
     _getEnergy: function(creep, targetId) {
         const target = Game.getObjectById(targetId);
         if (!target) {
-            console.log("[Upgrade] ❌ 找不到能量来源: " + targetId + " (Creep: " + creep.name + ")");
+            console.log("[Upgrade] ❌ 找不到能量来源: " + targetId + " (Creep: " + creep.name + ")，自动清理任务");
+            taskHelper.completeTask(creep);
             return;
         }
 
@@ -60,22 +63,6 @@ const taskUpgrade = {
         }
     },
 
-    /**
-     * 任务完成并自清理
-     * @private
-     */
-    _completeTask: function(creep) {
-        const taskboard = require('lib.AP.taskboard');
-        const taskRoom = creep.memory.taskRoom || creep.room.name;
-        // 使用更新后的 removeTask API，传入 creep.name 进行精准删除
-        taskboard.removeTask(taskRoom, 'Creeps', creep.name);
-        
-        // 清理自身内存
-        creep.memory.taskType = null;
-        creep.memory.taskData = null;
-        creep.memory.taskRoom = null;
-        creep.memory.working = false;
-    }
 };
 
 module.exports = taskUpgrade;

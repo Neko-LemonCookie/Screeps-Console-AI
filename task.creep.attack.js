@@ -5,6 +5,8 @@
  * 参数：targetRoomName
  */
 
+const taskHelper = require('lib.AP.taskHelper');
+
 const taskAttack = {
     /**
      * @param {Creep} creep 
@@ -100,7 +102,7 @@ const taskAttack = {
 
         // 4. 攻击控制器：在走到夺控那一步时结束任务
         if (controller && !controller.my) {
-            this._completeTask(creep);
+            taskHelper.completeTask(creep);
             return;
         }
 
@@ -204,29 +206,13 @@ const taskAttack = {
         if (criticalWalls.length === 0 && lowHpWalls.length === 0) {
             const hostileAny = room.find(FIND_HOSTILE_STRUCTURES).length > 0 || room.find(FIND_HOSTILE_CREEPS).length > 0;
             if (!hostileAny) {
-                this._completeTask(creep);
+                taskHelper.completeTask(creep);
             }
         }
         
         return criticalWalls.length > 0 ? criticalWalls : lowHpWalls;
     },
 
-    /**
-     * 任务完成并自清理
-     * @private
-     */
-    _completeTask: function(creep) {
-        const taskboard = require('lib.AP.taskboard');
-        const taskRoom = creep.memory.taskRoom || creep.room.name;
-        // 使用更新后的 removeTask API，传入 creep.name 进行精准删除
-        taskboard.removeTask(taskRoom, 'Creeps', creep.name);
-        
-        // 清理自身内存
-        creep.memory.taskType = null;
-        creep.memory.taskData = null;
-        creep.memory.taskRoom = null;
-        creep.memory.working = false;
-    }
 };
 
 module.exports = taskAttack;

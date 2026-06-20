@@ -4,6 +4,8 @@
  * 参数：fromId, toId, resourceType
  */
 
+const taskHelper = require('lib.AP.taskHelper');
+
 const taskCarry = {
     /**
      * @param {Creep} creep 
@@ -14,7 +16,7 @@ const taskCarry = {
 
         // 状态切换：完成一次搬运循环（送达并清空背包）则结束任务
         if (creep.memory.working && creep.store.getUsedCapacity() === 0) {
-            this._completeTask(creep);
+            taskHelper.completeTask(creep);
             return;
         }
         if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
@@ -26,7 +28,8 @@ const taskCarry = {
             // 送货逻辑
             const target = Game.getObjectById(data.toId);
             if (!target) {
-                console.log("[Carry] ❌ 找不到目标建筑: " + data.toId);
+                console.log("[Carry] ❌ 找不到目标建筑: " + data.toId + "，自动清理任务");
+                taskHelper.completeTask(creep);
                 return;
             }
 
@@ -39,7 +42,8 @@ const taskCarry = {
             // 取货逻辑
             const source = Game.getObjectById(data.fromId);
             if (!source) {
-                console.log("[Carry] ❌ 找不到源建筑: " + data.fromId);
+                console.log("[Carry] ❌ 找不到源建筑: " + data.fromId + "，自动清理任务");
+                taskHelper.completeTask(creep);
                 return;
             }
 
@@ -50,22 +54,6 @@ const taskCarry = {
         }
     },
 
-    /**
-     * 任务完成并自清理
-     * @private
-     */
-    _completeTask: function(creep) {
-        const taskboard = require('lib.AP.taskboard');
-        const taskRoom = creep.memory.taskRoom || creep.room.name;
-        // 使用更新后的 removeTask API，传入 creep.name 进行精准删除
-        taskboard.removeTask(taskRoom, 'Creeps', creep.name);
-        
-        // 清理自身内存
-        creep.memory.taskType = null;
-        creep.memory.taskData = null;
-        creep.memory.taskRoom = null;
-        creep.memory.working = false;
-    }
 };
 
 module.exports = taskCarry;

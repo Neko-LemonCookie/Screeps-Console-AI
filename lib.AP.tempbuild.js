@@ -42,7 +42,8 @@ const libAPTempbuild = {
         ],
         7: [
             { type: STRUCTURE_FACTORY, x: 0, y: 2 },
-            { type: STRUCTURE_SPAWN, x: 2, y: 2, name: "CoreI_" }
+            { type: STRUCTURE_SPAWN, x: 2, y: 2, name: "CoreI_" },
+            { type: STRUCTURE_LINK, x: 1, y: 2 }   // 小房间只需1个Link
         ],
         8: [
             { type: STRUCTURE_SPAWN, x: -2, y: 2, name: "CoreI_" },
@@ -129,7 +130,8 @@ const libAPTempbuild = {
             { type: STRUCTURE_EXTENSION, x: 4, y: 2 },
             { type: STRUCTURE_EXTENSION, x: 4, y: 3 },
             { type: STRUCTURE_EXTENSION, x: 2, y: 4 },
-            { type: STRUCTURE_ROAD, x: 3, y: 2 }
+            { type: STRUCTURE_ROAD, x: 3, y: 2 },
+            { type: STRUCTURE_LINK, x: 3, y: 2 }   // Link: Source→Storage 快速传输
         ],
         7: [
             { type: STRUCTURE_FACTORY, x: 0, y: 2 },
@@ -145,7 +147,8 @@ const libAPTempbuild = {
             { type: STRUCTURE_LAB, x: -2, y: 3 },
             { type: STRUCTURE_LAB, x: -1, y: 4 },
             { type: STRUCTURE_EXTENSION, x: -2, y: 4 },
-            { type: STRUCTURE_ROAD, x: -1, y: 3 }
+            { type: STRUCTURE_ROAD, x: -1, y: 3 },
+            { type: STRUCTURE_LINK, x: -3, y: 2 }  // Link2: 第二条传输线
         ],
         8: [
             { type: STRUCTURE_SPAWN, x: -1, y: -2, name: "CoreII_" },
@@ -457,54 +460,78 @@ const libAPTempbuild = {
     },
 
     /**
-     * 放置外部道路逻辑
+     * 放置外部道路逻辑（渐进式：按RCL逐步扩展）
+     * RCL 4: 只铺 Source → 城市核心的必经路
+     * RCL 5: 铺 Controller → 城市核心的路
+     * RCL 6: 链 Mineral + Storage 的路
+     * RCL 7+: 全部补完剩余路径
      * @private
      */
     _placePaths: function(room, centerPos) {
+        // 【新增】工地上限保护：道路工地过多时暂停新规划
+        var currentSites = room.find(FIND_CONSTRUCTION_SITES).filter(function(cs) {
+            return cs.structureType === STRUCTURE_ROAD;
+        }).length;
+        var MAX_ROAD_SITES = 20;  // 同时存在的道路工地上限
+        if (currentSites >= MAX_ROAD_SITES) return false;
+
         const isCoreRoom = room.memory.layoutType === '9x9';
         const citySize = isCoreRoom ? 9 : 5;
         const radius = Math.floor(citySize / 2);
         const template = isCoreRoom ? this.template9x9 : this.template5x5;
+        const rcl = room.controller.level;
 
-        // 1. 获取“道路起点”：不仅包含现有道路，还包含模板中规划的所有道路
+        // 1. 获取"道路起点"：模板中位于城市边缘的道路位置
         const startPoints = [];
-        
-        // 遍历所有 RCL 等级的模板
         for (const level in template) {
             for (const b of template[level]) {
                 if (b.type === STRUCTURE_ROAD) {
                     const px = centerPos.x + b.x;
                     const py = centerPos.y + b.y;
-                    // 只有在边缘的规划路才作为起点
                     if (Math.abs(b.x) === radius || Math.abs(b.y) === radius) {
                         startPoints.push(new RoomPosition(px, py, room.name));
                     }
                 }
             }
         }
-        
         if (startPoints.length === 0) return false;
 
-        // 2. 确定需要连接的目标
+        // 2. 根据RCL决定要连接哪些目标（渐进式）
         const targets = [];
-        if (room.controller) targets.push(room.controller.pos);
-        room.find(FIND_SOURCES).forEach(s => targets.push(s.pos));
-        room.find(FIND_MINERALS).forEach(m => targets.push(m.pos));
+        // 所有RCL都连接Source（生存基础）
+        room.find(FIND_SOURCES).forEach(s => targets.push({ pos: s.pos, priority: 0 }));
+        // RCL 5+ 连接Controller
+        if (rcl >= 5 && room.controller) {
+            targets.push({ pos: room.controller.pos, priority: 1 });
+        }
+        // RCL 6+ 连接Mineral和Storage
+        if (rcl >= 6) {
+            room.find(FIND_MINERALS).forEach(m => targets.push({ pos: m.pos, priority: 2 }));
+            if (room.storage) targets.push({ pos: room.storage.pos, priority: 3 });
+        }
+        if (targets.length === 0) return false;
 
-        // 3. 路径规划与建造
-        for (const targetPos of targets) {
-            // 路径规划：从最近的起点开始
-            const pathResult = PathFinder.search(targetPos, startPoints.map(p => ({ pos: p, range: 0 })), {
-                roomCallback: (rName) => {
+        // 按优先级排序（低=先处理）
+        targets.sort((a, b) => a.priority - b.priority);
+
+        // 3. 路径规划与建造（每tick限制工地数量）
+        let placedThisTick = false;
+        const maxRoadsPerTarget = rcl <= 5 ? 2 : 4;
+
+        for (const target of targets) {
+            if (placedThisTick) break;
+
+            const pathResult = PathFinder.search(target.pos, startPoints.map(p => ({ pos: p, range: 0 })), {
+                roomCallback: function(rName) {
                     if (rName !== room.name) return false;
-                    const costs = new PathFinder.CostMatrix();
-                    room.find(FIND_STRUCTURES).forEach(s => {
+                    var costs = new PathFinder.CostMatrix();
+                    room.find(FIND_STRUCTURES).forEach(function(s) {
                         if (s.structureType === STRUCTURE_ROAD) costs.set(s.pos.x, s.pos.y, 1);
                         else if (s.structureType !== STRUCTURE_RAMPART && (OBSTACLE_OBJECT_TYPES.includes(s.structureType) || s.structureType === STRUCTURE_WALL)) {
                             costs.set(s.pos.x, s.pos.y, 0xff);
                         }
                     });
-                    room.find(FIND_CONSTRUCTION_SITES).forEach(cs => {
+                    room.find(FIND_CONSTRUCTION_SITES).forEach(function(cs) {
                         if (cs.structureType !== STRUCTURE_ROAD && cs.structureType !== STRUCTURE_RAMPART) {
                             costs.set(cs.pos.x, cs.pos.y, 0xff);
                         }
@@ -515,26 +542,33 @@ const libAPTempbuild = {
                 swampCost: 10
             });
 
-            if (!pathResult.incomplete) {
-                for (const step of pathResult.path) {
+            if (!pathResult.incomplete && pathResult.path.length > 0) {
+                let placedForTarget = 0;
+                for (var si = 0; si < pathResult.path.length; si++) {
+                    var step = pathResult.path[si];
+                    if (placedForTarget >= maxRoadsPerTarget) break;
                     if (step.lookFor(LOOK_STRUCTURES).length === 0 && step.lookFor(LOOK_CONSTRUCTION_SITES).length === 0) {
-                        if (room.createConstructionSite(step, STRUCTURE_ROAD) === OK) return true;
+                        if (room.createConstructionSite(step, STRUCTURE_ROAD) === OK) {
+                            placedForTarget++;
+                            placedThisTick = true;
+                        }
                     }
                 }
             }
 
-            // 特殊逻辑：能量源所有采矿位必须是道路
-            const source = room.find(FIND_SOURCES).find(s => s.pos.getRangeTo(targetPos) === 0);
+            // Source采矿位强制铺路
+            var source = room.find(FIND_SOURCES).find(function(s) { return s.pos.getRangeTo(target.pos) === 0; });
             if (source) {
-                const spots = this.getMiningSpots(source.id);
-                for (const spot of spots) {
+                var spots = this.getMiningSpots(source.id);
+                for (var spi = 0; spi < spots.length; spi++) {
+                    var spot = spots[spi];
                     if (spot.lookFor(LOOK_STRUCTURES).length === 0 && spot.lookFor(LOOK_CONSTRUCTION_SITES).length === 0) {
                         if (room.createConstructionSite(spot, STRUCTURE_ROAD) === OK) return true;
                     }
                 }
             }
         }
-        return false;
+        return placedThisTick;
     },
 
     /**

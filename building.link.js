@@ -13,6 +13,9 @@ module.exports = {
         // 设置全局函数 (仅在第一次运行时，方便控制台操作)
         if (!global.setlink) this._setupGlobal();
 
+        // 【新增】自动发现未配对的Link并尝试配对
+        this._autoPairLinks(room);
+
         const roomName = room.name;
         if (!Memory.linkPairs || Memory.linkPairs.length === 0) return;
 
@@ -113,6 +116,90 @@ module.exports = {
             const target = Game.getObjectById(pair.targetId);
             return !!(source && target);
         });
+    },
+
+    /**
+     * 自动发现房间内未配对的Link并配对
+     * 规则：靠近Source的Link作为源端，靠近Storage的Link作为接收端
+     * @private
+     */
+    _autoPairLinks: function(room) {
+        var links = room.find(FIND_STRUCTURES, {
+            filter: function(s) { return s.structureType === STRUCTURE_LINK; }
+        });
+
+        if (links.length < 2) return;  // 至少需要2个Link才能配对
+
+        // 获取参考点
+        var sources = room.find(FIND_SOURCES);
+        var storagePos = room.storage ? room.storage.pos :
+                         (room.terminal ? room.terminal.pos : room.controller.pos);
+
+        // 分类Link：靠近Source的为源端，其余为接收端
+        var sourceLinks = [];   // 靠近Source的Link
+        var receiverLinks = []; // 其他Link（应该靠近Storage）
+
+        for (var i = 0; i < links.length; i++) {
+            var link = links[i];
+            var nearSource = false;
+            for (var si = 0; si < sources.length; si++) {
+                if (link.pos.getRangeTo(sources[si].pos) <= 3) {
+                    nearSource = true;
+                    break;
+                }
+            }
+
+            if (nearSource) {
+                sourceLinks.push(link);
+            } else {
+                receiverLinks.push(link);
+            }
+        }
+
+        // 配对：每个源端Link找最近的接收端Link
+        for (var sl = 0; sl < sourceLinks.length; sl++) {
+            var sLink = sourceLinks[sl];
+
+            // 检查是否已配对
+            var alreadyPaired = false;
+            if (Memory.linkPairs) {
+                for (var pi = 0; pi < Memory.linkPairs.length; pi++) {
+                    if (Memory.linkPairs[pi].sourceId === sLink.id) {
+                        alreadyPaired = true;
+                        break;
+                    }
+                }
+            }
+            if (alreadyPaired) continue;
+
+            // 找最近的接收端Link
+            var bestReceiver = null;
+            var bestRange = Infinity;
+            for (var rl = 0; rl < receiverLinks.length; rl++) {
+                var rLink = receiverLinks[rl];
+                var range = sLink.pos.getRangeTo(rLink);
+                if (range <= 10 && range < bestRange) {  // Link最大范围10格
+                    // 检查接收端是否已被占用
+                    var receiverUsed = false;
+                    if (Memory.linkPairs) {
+                        for (var pi2 = 0; pi2 < Memory.linkPairs.length; pi2++) {
+                            if (Memory.linkPairs[pi2].targetId === rLink.id) {
+                                receiverUsed = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!receiverUsed) {
+                        bestRange = range;
+                        bestReceiver = rLink;
+                    }
+                }
+            }
+
+            if (bestReceiver) {
+                this.addLinkPair(sLink.id, bestReceiver.id);
+            }
+        }
     },
 
     /**

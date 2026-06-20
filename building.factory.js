@@ -45,7 +45,6 @@ module.exports = {
                     if (canProduceNow) {
                         item.task.takenBy = factory.id;
                         produceTaskIndex = item.index;
-                        if (!Memory.rooms[room.name]) Memory.rooms[room.name] = {};
                         Memory.rooms[room.name].factoryWaitTimer = 50;
                         break;
                     }

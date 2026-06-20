@@ -64,6 +64,16 @@ const libAPTaskboard = {
     },
 
     /**
+     * 获取指定房间的任务列表（封装 Memory 深度访问，避免 15+ 处重复写法）
+     * @param {string} roomName 房间名
+     * @param {string} category 'Creeps' 或 'Buildings'
+     * @returns {Array} 任务数组，无数据时返回空数组
+     */
+    getTasks: function(roomName, category) {
+        return (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task[category] && Memory.Taskboard.Task[category][roomName]) || [];
+    },
+
+    /**
      * Creeps 任务 API
      */
     creeps: {
@@ -247,12 +257,24 @@ const libAPTaskboard = {
             libAPTaskboard._addTask('Buildings', roomName, 'nukeattack', { targetRoomName: targetRoomName });
         },
 
-        spawn: function(roomName, model, energy) {
-            if (!roomName || !model || !energy) {
-                console.log("[Taskboard] ❌ Error: spawn 任务参数缺失 (roomName: " + roomName + ", model: " + model + ", energy: " + energy + ")");
+        /**
+         * 发布Spawn任务（支持Strategy集成，4参数版本）
+         * @param {string} roomName 房间名
+         * @param {string} model Creep型号
+         * @param {string|number} priority 优先级或能量值
+         * @param {Object} data 附加数据（可选）
+         */
+        spawn: function(roomName, model, priority, data) {
+            if (!roomName || !model) {
+                console.log("[Taskboard] ❌ Error: spawn 任务参数缺失 (roomName: " + roomName + ", model: " + model + ")");
                 return;
             }
-            libAPTaskboard._addTask('Buildings', roomName, 'spawn', { model: model, energy: energy });
+            libAPTaskboard._addTask('Buildings', roomName, 'spawn', {
+                model: model,
+                priority: priority,
+                data: data || {},
+                requestedTime: Game.time
+            });
         },
 
         linktransport: function(roomName) {
@@ -269,6 +291,39 @@ const libAPTaskboard = {
                 return;
             }
             libAPTaskboard._addTask('Buildings', roomName, 'boost', { bodyPart: bodyPart });
+        }
+    },
+
+    /**
+     * Strategy 任务 API (全局决策AI)
+     */
+    strategy: {
+        needCreeps: function(roomName, options) {
+            if (!roomName || !options || !options.model || !options.count) return;
+            libAPTaskboard._addTask('Strategy', roomName, 'need_creeps', {
+                model: options.model,
+                count: options.count,
+                priority: options.priority || 'harvest',
+                data: options.data || {},
+                refreshInterval: options.refreshInterval || 100
+            });
+        },
+        marketAction: function(roomName, action, resource, amount) {
+            if (typeof ENABLE_MARKET !== 'undefined' && !ENABLE_MARKET) return;
+            libAPTaskboard._addTask('Strategy', roomName, 'market_action', {
+                action: action, resource: resource, amount: amount
+            });
+        },
+        labProduction: function(roomName, compound, targetAmount) {
+            libAPTaskboard._addTask('Strategy', roomName, 'lab_production', {
+                compound: compound, targetAmount: targetAmount
+            });
+        },
+        cleanExpired: function(roomName, maxAge) {
+            if (!Memory.Taskboard?.Task?.Strategy?.[roomName]) return;
+            const now = Game.time;
+            Memory.Taskboard.Task.Strategy[roomName] = Memory.Taskboard.Task.Strategy[roomName]
+                .filter(task => (now - task.createdTime) < maxAge);
         }
     }
 };

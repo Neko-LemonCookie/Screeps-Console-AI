@@ -106,7 +106,8 @@ const buildingTerminal = {
 
             case 'automarket':
                 // automarket: 在现有信用点 > 安全限额时才接单
-                const minCredits = Memory.AutoMarket.settings.minCredits;
+                const autoMarketSettings = Memory.AutoMarket && Memory.AutoMarket.settings;
+                const minCredits = autoMarketSettings ? autoMarketSettings.minCredits : 0;
                 if (Game.market.credits <= minCredits) {
                     return false;
                 }

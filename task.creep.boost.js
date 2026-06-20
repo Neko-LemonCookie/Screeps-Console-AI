@@ -4,6 +4,8 @@
  * 任务结束条件：成功接受强化 或 目标 LAB 任务已结束
  */
 
+const taskHelper = require('lib.AP.taskHelper');
+
 module.exports = {
     /**
      * 执行强化任务
@@ -13,7 +15,7 @@ module.exports = {
     run: function(creep, data) {
         const lab = Game.getObjectById(data.labId);
         if (!lab) {
-            this._completeTask(creep);
+            taskHelper.completeTask(creep);
             return;
         }
 
@@ -21,14 +23,14 @@ module.exports = {
         const buildingTasks = (Memory.Taskboard && Memory.Taskboard.Task.Buildings[creep.room.name]) || [];
         const hasBoostTask = buildingTasks.some(t => t.type === 'boost' && t.takenBy === data.labId && t.data.bodyPart === data.bodyPart);
         if (!hasBoostTask) {
-            this._completeTask(creep);
+            taskHelper.completeTask(creep);
             return;
         }
 
         // 检查是否已经完成强化 (寻找对应的强化后的部件)
         const isBoosted = creep.body.some(p => p.type === data.bodyPart && p.boost);
         if (isBoosted) {
-            this._completeTask(creep);
+            taskHelper.completeTask(creep);
             return;
         }
 
@@ -40,15 +42,4 @@ module.exports = {
             creep.moveTo(lab, { visualizePathStyle: { stroke: '#ffffff' } });
         }
     },
-
-    /**
-     * 结束任务并清理内存
-     * @private
-     */
-    _completeTask: function(creep) {
-        const taskboard = require('lib.AP.taskboard');
-        taskboard.removeTask(creep.room.name, 'Creeps', creep.name);
-        creep.memory.taskType = null;
-        creep.memory.taskData = null;
-    }
 };

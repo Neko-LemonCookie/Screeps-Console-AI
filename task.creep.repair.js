@@ -4,6 +4,8 @@
  * 参数：targetId (能量来源建筑 ID 或 Source ID)
  */
 
+const taskHelper = require('lib.AP.taskHelper');
+
 const taskRepair = {
     /**
      * @param {Creep} creep 
@@ -42,7 +44,7 @@ const taskRepair = {
                     }
                 } else {
                     // 完全没有可修复的建筑，任务结束
-                    this._completeTask(creep);
+                    taskHelper.completeTask(creep);
                 }
             }
         } else {
@@ -58,7 +60,8 @@ const taskRepair = {
     _getEnergy: function(creep, targetId) {
         const target = Game.getObjectById(targetId);
         if (!target) {
-            console.log("[Repair] ❌ 找不到能量来源: " + targetId + " (Creep: " + creep.name + ")");
+            console.log("[Repair] ❌ 找不到能量来源: " + targetId + " (Creep: " + creep.name + ")，自动清理任务");
+            taskHelper.completeTask(creep);
             return;
         }
 
@@ -74,22 +77,6 @@ const taskRepair = {
         }
     },
 
-    /**
-     * 任务完成并自清理
-     * @private
-     */
-    _completeTask: function(creep) {
-        const taskboard = require('lib.AP.taskboard');
-        const taskRoom = creep.memory.taskRoom || creep.room.name;
-        // 使用更新后的 removeTask API，传入 creep.name 进行精准删除
-        taskboard.removeTask(taskRoom, 'Creeps', creep.name);
-        
-        // 清理自身内存
-        creep.memory.taskType = null;
-        creep.memory.taskData = null;
-        creep.memory.taskRoom = null;
-        creep.memory.working = false;
-    }
 };
 
 module.exports = taskRepair;
