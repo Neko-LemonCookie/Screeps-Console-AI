@@ -65,6 +65,18 @@ const unibot = {
         // 领取任务
         if (bestTask) {
             this._assignTask(creep, bestTask, roomName, bestTaskIndex);
+            return;
+        }
+
+        // 无任务可接：尝试走到spawn回收自己（减少多余creep）
+        const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
+        if (spawn) {
+            if (creep.pos.isEqualTo(spawn.pos)) {
+                const res = spawn.recycleCreep(creep);
+                if (res === OK) console.log("[" + creep.room.name + "] ♻️ 回收: " + creep.name);
+            } else {
+                creep.moveTo(spawn, { visualizePathStyle: { stroke: '#ff0000' } });
+            }
         }
     },
 

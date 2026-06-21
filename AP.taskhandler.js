@@ -117,6 +117,17 @@ const APTaskhandler = {
         const currentCount = this._countCreepsByModel(roomName, model);
         const idleCount = this._countIdleCreepsByModel(roomName, model);
 
+        // 【根因修复】硬上限安全网：无论策略层传什么差值，超过硬上限一律不造
+        // 防止策略层异常/延迟/tick间状态不一致导致超额
+        const HARD_CAPS = { CommonI: 12, CarrierI: 8, AttackerI: 5, ClaimerI: 3 };
+        if (currentCount >= (HARD_CAPS[model] || 10)) {
+            if (Game.time % 200 === 0) {
+                console.log("[TaskHandler] 🛑 " + model + "已达硬上限(" + (HARD_CAPS[model] || 10) +
+                           ")，当前" + currentCount + "，拒绝生成");
+            }
+            return;
+        }
+
         // taskOnly模式：只发布Creep任务，不生成新creep（用于upgrade/repair等辅助任务）
         if (taskOnly) {
             this._publishCreepTasks(taskboard, roomName, priority, taskTarget);
@@ -147,11 +158,11 @@ const APTaskhandler = {
             default: energy = 200; break;
         }
 
-        // 【新增】考虑等待中的 spawn 任务，避免重复生成
+        // 【修复】统计所有 spawn 任务（包括已领取的正在孵化的），避免漏算导致多发
         const existingSpawnTasks = modules.taskboard.getTasks(roomName, 'Buildings');
-        const waitingSpawnTasks = existingSpawnTasks.filter(t => t.type === 'spawn' && !t.takenBy);
+        const allSpawnTasks = existingSpawnTasks.filter(t => t.type === 'spawn');
 
-        for (const task of waitingSpawnTasks) {
+        for (const task of allSpawnTasks) {
             const taskModel = task.data.model;
             switch (taskModel) {
                 case 'AttackerI':
@@ -418,15 +429,23 @@ const APTaskhandler = {
     },
 
     /**
-     * 计算需要额外生成多少 creep
+     * 计算需要额外生成多少 creep（Path B：任务驱动弹性补足）
+     *
+     * 设计意图：
+     *   策略层(Path A)负责保底（minCount），本方法负责弹性补足。
+     *   当实际任务量超过策略层分配的creep承载力时，在maxCount上限内补充。
+     *   有layoutType的房间：只补足弹性类型(carry/build/police)，不重复策略已管的硬性指标。
+     *   无layoutType的房间：全类型处理（早期无策略兜底）。
      * @private
      */
     _calculateCreepNeeds: function() {
         const creepNeeds = {};
-        
+
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName];
             if (!room.controller || !room.controller.my) continue;
+
+            const hasLayout = !!room.memory.layoutType;
             
             const needs = [];
             
@@ -444,11 +463,11 @@ const APTaskhandler = {
             // 统计有效 creep
             const validCreeps = this._countValidCreeps(roomName);
 
-            // 【新增】考虑等待中的 spawn 任务
+            // 【修复】统计所有 spawn 任务（包括已领取的正在孵化的），避免漏算导致多发
             const existingSpawnTasks = modules.taskboard.getTasks(roomName, 'Buildings');
-            const waitingSpawnTasks = existingSpawnTasks.filter(t => t.type === 'spawn' && !t.takenBy);
+            const allSpawnTasks = existingSpawnTasks.filter(t => t.type === 'spawn');
 
-            for (const task of waitingSpawnTasks) {
+            for (const task of allSpawnTasks) {
                 const model = task.data.model;
                 switch (model) {
                     case 'AttackerI':
@@ -466,9 +485,10 @@ const APTaskhandler = {
                 }
             }
 
-            // 1. repair/attack/claim/claimupgrade/globalcarry: 每个任务对应一个 creep
-            // 注意：harvest/upgrade 已由策略系统接管，此处不再生成 spawn 需求
-            const longTermTasks = ['repair', 'attack', 'claim', 'claimupgrade', 'globalcarry'];
+            // 1. 长期任务：attack/claim/claimupgrade/globalcarry
+            //    有策略层时这些由策略管（AttackerI/ClaimerI的minCount），Path B不重复生成
+            //    无策略层时全量处理
+            const longTermTasks = hasLayout ? [] : ['attack', 'claim', 'claimupgrade', 'globalcarry', 'repair'];
             for (const taskType of longTermTasks) {
                 const needed = (taskCounts[taskType] || 0) - (validCreeps[taskType] || 0);
                 for (let i = 0; i < needed; i++) {
@@ -476,22 +496,25 @@ const APTaskhandler = {
                 }
             }
             
-            // 2. build: 计算建筑工地需要的能量，每 5K 对应一个 build 任务，每个任务对应一个 creep
-            const buildTasks = tasks.filter(t => t.type === 'build');
-            let buildCreepsNeeded = this._calculateBuildCreeps(room, buildTasks.length);
+            // 2. build: 建筑工地需要的creep（弹性补足，两种房间都允许）
+            //    策略层管保底数量，Path B在工地暴增时弹性追加
+            {
+                const buildTasks = tasks.filter(t => t.type === 'build');
+                let buildCreepsNeeded = this._calculateBuildCreeps(room, buildTasks.length);
 
-            // 【新增】考虑等待中的 spawn 任务（已在上方统计）
-            for (const task of waitingSpawnTasks) {
-                const model = task.data.model;
-                if (model === 'CommonI') {
-                    buildCreepsNeeded++;
+                // 【新增】考虑等待中的 spawn 任务（已在上方统计为 allSpawnTasks）
+                for (const task of allSpawnTasks) {
+                    const model = task.data.model;
+                    if (model === 'CommonI') {
+                        buildCreepsNeeded++;
+                    }
                 }
-            }
 
-            const currentBuildCreeps = validCreeps['build'] || 0;
-            const needed = Math.max(0, buildCreepsNeeded - currentBuildCreeps);
-            for (let i = 0; i < needed; i++) {
-                needs.push({ type: 'build', priority: this._getTaskPriority('build') });
+                const currentBuildCreeps = validCreeps['build'] || 0;
+                const needed = Math.max(0, buildCreepsNeeded - currentBuildCreeps);
+                for (let i = 0; i < needed; i++) {
+                    needs.push({ type: 'build', priority: this._getTaskPriority('build') });
+                }
             }
             
             // 3. police: 如果有 police 任务，需要 3 个 creep（硬编码）
@@ -520,16 +543,45 @@ const APTaskhandler = {
             
             // 按优先级排序
             needs.sort((a, b) => a.priority - b.priority);
-            
-            // 【新增】全局节流：只有未领取任务数 > 空闲creep数 + 2 时才制造新creep，防止超额
-            const unclaimedTasks = tasks.filter(t => !t.takenBy).length;
-            const idleCreeps = room.find(FIND_MY_CREEPS).filter(c => !c.memory.taskType || c.memory.taskType === 'unibot').length;
-            if (unclaimedTasks <= idleCreeps + 2) {
-                needs.length = 0; // 清空数组，不重新赋值
+
+            // 【根因修复】per-model 硬上限预算：Path B 只能在策略层没填满的额度内弹性补足
+            // 统计当前各型号的 creep 数量（含正在孵化的 spawn 任务）
+            const MODEL_CAPS = { CommonI: 12, CarrierI: 8, AttackerI: 5, ClaimerI: 3 };
+            const modelCounts = { CommonI: 0, CarrierI: 0, AttackerI: 0, ClaimerI: 0 };
+
+            // 统计场上的 creep
+            for (const c of room.find(FIND_MY_CREEPS)) {
+                if (c.memory.model && modelCounts[c.memory.model] !== undefined) {
+                    modelCounts[c.memory.model]++;
+                }
             }
-            
-            if (needs.length > 0) {
-                creepNeeds[roomName] = needs;
+            // 加上已发布但未执行的 spawn 任务（避免漏算导致超额）
+            const pendingSpawns = modules.taskboard.getTasks(roomName, 'Buildings').filter(t => t.type === 'spawn');
+            for (const ps of pendingSpawns) {
+                const m = ps.data && ps.data.model;
+                if (m && modelCounts[m] !== undefined) modelCounts[m]++;
+            }
+
+            // 将 taskType 映射到 model
+            const taskTypeToModel = {
+                'harvest': 'CommonI', 'upgrade': 'CommonI', 'build': 'CommonI', 'repair': 'CommonI',
+                'carry': 'CarrierI', 'globalcarry': 'CarrierI',
+                'attack': 'AttackerI', 'police': 'AttackerI',
+                'claim': 'ClaimerI', 'reserve': 'ClaimerI', 'claimupgrade': 'CommonI', 'claimbuild': 'CommonI'
+            };
+
+            // 过滤：只保留不超过预算的 need
+            const filteredNeeds = [];
+            for (const need of needs) {
+                const model = taskTypeToModel[need.type];
+                if (!model || modelCounts[model] < (MODEL_CAPS[model] || 10)) {
+                    filteredNeeds.push(need);
+                    if (model) modelCounts[model]++; // 预占额度
+                }
+            }
+
+            if (filteredNeeds.length > 0) {
+                creepNeeds[roomName] = filteredNeeds;
             }
         }
         

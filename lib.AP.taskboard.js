@@ -88,13 +88,11 @@ const libAPTaskboard = {
             if (typeof typeOrIndexOrName === 'number') {
                 tasks.splice(typeOrIndexOrName, 1);
             } else {
-                // 如果是 Creeps 类别，先尝试通过 takenBy 删除（精确匹配）
-                if (category === 'Creeps') {
-                    const index = tasks.findIndex(t => t.takenBy === typeOrIndexOrName);
-                    if (index !== -1) {
-                        tasks.splice(index, 1);
-                        return;
-                    }
+                // 所有类别都先尝试通过 takenBy 删除（精确匹配）
+                const index = tasks.findIndex(t => t.takenBy === typeOrIndexOrName);
+                if (index !== -1) {
+                    tasks.splice(index, 1);
+                    return;
                 }
                 // 如果没找到，则按类型删除（全匹配）
                 Memory.Taskboard.Task[category][roomName] = tasks.filter(t => t.type !== typeOrIndexOrName);

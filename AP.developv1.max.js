@@ -45,6 +45,8 @@ const DevelopV1_Max = {
         for (const model in configs) {
             const cfg = configs[model];
             const current = (state.creeps[model] || 0);
+            // 【根因修复】已达上限的型号跳过
+            if (current >= cfg.maxCount) continue;
             if (current < cfg.minCount) {
                 taskboard.strategy.needCreeps(room.name, {
                     model: model, count: cfg.minCount - current,

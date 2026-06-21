@@ -51,8 +51,11 @@ const DevelopV1_L5 = {
 
     _publishCreepNeeds: function(room, state) {
         const taskboard = require('lib.AP.taskboard');
-        // CommonI
+        // 【根因修复】已达上限时完全不请求，防止超额
         const curCommon = (state.creeps.CommonI || 0);
+        if (curCommon >= this.CONFIG.CREEP_CONFIG.CommonI.maxCount) return;
+
+        // CommonI
         if (curCommon < this.CONFIG.CREEP_CONFIG.CommonI.minCount) {
             taskboard.strategy.needCreeps(room.name, {
                 model: 'CommonI', count: this.CONFIG.CREEP_CONFIG.CommonI.minCount - curCommon,

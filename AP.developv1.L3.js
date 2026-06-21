@@ -7,7 +7,7 @@ const DevelopV1_L3 = {
     CONFIG: {
         REFRESH_INTERVAL: 50,
         CREEP_CONFIG: {
-            CommonI: { minCount: 5, maxCount: 5, bodySize: 'small', priorities: ['harvest','upgrade','build','repair'] }
+            CommonI: { minCount: 5, maxCount: 8, bodySize: 'small', priorities: ['harvest','upgrade','build','repair'] }
         }
     },
 

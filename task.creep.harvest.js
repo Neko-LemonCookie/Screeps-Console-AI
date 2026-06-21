@@ -299,9 +299,41 @@ const taskHarvest = {
                 taskHelper.completeTask(creep);
             }
         } else {
-            // 【新增】所有存储目标都满了，清理任务
-            console.log("[Harvest] ❌ 所有存储目标都满了，清理任务: " + creep.name);
-            taskHelper.completeTask(creep);
+            // 所有存储目标都满了，不放弃而是切换到其他有用任务
+            const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+            if (sites.length > 0) {
+                // 有工地：切换为建造任务
+                const taskboard = require('lib.AP.taskboard');
+                taskboard.removeTask(creep.room.name, 'Creeps', creep.name);
+                taskboard.creeps.build(creep.room.name, sites[0].id);
+                const roomTasks = Memory.Taskboard.Task.Creeps[creep.room.name];
+                const newTask = roomTasks[roomTasks.length - 1];
+                if (newTask) {
+                    newTask.takenBy = creep.name;
+                    creep.memory.taskType = 'build';
+                    creep.memory.taskData = { targetId: sites[0].id };
+                    creep.memory.working = undefined;
+                    creep.say('🔨 改建造');
+                }
+            } else if (creep.room.controller && creep.room.controller.my) {
+                // 没工地：切换为升级任务
+                const taskboard2 = require('lib.AP.taskboard');
+                taskboard2.removeTask(creep.room.name, 'Creeps', creep.name);
+                taskboard2.creeps.upgrade(creep.room.name, creep.room.controller.id);
+                const roomTasks2 = Memory.Taskboard.Task.Creeps[creep.room.name];
+                const newTask2 = roomTasks2[roomTasks2.length - 1];
+                if (newTask2) {
+                    newTask2.takenBy = creep.name;
+                    creep.memory.taskType = 'upgrade';
+                    creep.memory.taskData = { targetId: creep.room.controller.id };
+                    creep.memory.working = undefined;
+                    creep.say('⬆️ 改升级');
+                }
+            } else {
+                // 真的没事可做才清理任务
+                console.log("[Harvest] ❌ 存储满且无替代任务，清理: " + creep.name);
+                taskHelper.completeTask(creep);
+            }
         }
     }
             return;
