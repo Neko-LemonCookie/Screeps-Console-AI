@@ -13,8 +13,9 @@ const DevelopV1_L3 = {
 
     run: function(room) {
         try {
+            // 2 tick 执行一次全部决策，CPU 无压力
+            if (Game.time % 2 !== 0) return;
             const state = this.analyze(room);
-            if (!this._shouldRefresh(room)) return;
             this._publishCreepNeeds(room, state);
             this._checkMilestone(room, state);
         } catch (e) { console.log("[DevelopV1-L3] ERROR:", e.message); }
@@ -32,22 +33,14 @@ const DevelopV1_L3 = {
         };
     },
 
-    _shouldRefresh: function(room) {
-        const last = room.memory.lastStrategyRefresh || 0;
-        if (Game.time - last >= this.CONFIG.REFRESH_INTERVAL) { room.memory.lastStrategyRefresh = Game.time; return true; }
-        return false;
-    },
-
     _publishCreepNeeds: function(room, state) {
         const taskboard = require('lib.AP.taskboard');
         const config = this.CONFIG.CREEP_CONFIG.CommonI;
         const current = state.commonICount;
 
-        if (current === 0) return;
-
         const sourceCount = state.sourceCount || 2;
-        const harvestCount = sourceCount * 3;
-        const upgradeCount = 3;
+        const harvestCount = 3;
+        const upgradeCount = 6;
 
         // ====== Spawn 需求（只在缺人时创建）======
         if (current < config.minCount) {

@@ -17,8 +17,8 @@ const DevelopV1_Max = {
 
     run: function(room) {
         try {
+            if (Game.time % 2 !== 0) return;
             const state = this.analyze(room);
-            if (!this._shouldRefresh(room)) return;
             this._publishCreepNeeds(room, state);
             this._optimizeEconomy(room, state);
             this._evaluateExpansion(room, state);
@@ -37,12 +37,6 @@ const DevelopV1_Max = {
             gcl: Game.gcl.level, labCount: room.find(FIND_STRUCTURES, { filter: s => s.structureType === STRUCTURE_LAB }).length,
             terminalAvailable: !!room.terminal
         };
-    },
-
-    _shouldRefresh: function(room) {
-        const last = room.memory.lastStrategyRefresh || 0;
-        if (Game.time - last >= this.CONFIG.REFRESH_INTERVAL) { room.memory.lastStrategyRefresh = Game.time; return true; }
-        return false;
     },
 
     _publishCreepNeeds: function(room, state) {

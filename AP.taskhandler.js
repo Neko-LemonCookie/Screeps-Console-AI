@@ -147,6 +147,28 @@ const APTaskhandler = {
             default: energy = 200; break;
         }
 
+        // 【新增】考虑等待中的 spawn 任务，避免重复生成
+        const existingSpawnTasks = modules.taskboard.getTasks(roomName, 'Buildings');
+        const waitingSpawnTasks = existingSpawnTasks.filter(t => t.type === 'spawn' && !t.takenBy);
+
+        for (const task of waitingSpawnTasks) {
+            const taskModel = task.data.model;
+            switch (taskModel) {
+                case 'AttackerI':
+                    deficit--;
+                    break;
+                case 'CarrierI':
+                    deficit--;
+                    break;
+                case 'ClaimerI':
+                    deficit--;
+                    break;
+                case 'CommonI':
+                    deficit--;
+                    break;
+            }
+        }
+
         // 每次最多补3个
         const spawnCount = Math.min(deficit, 3);
         for (var i = 0; i < spawnCount; i++) {
@@ -410,9 +432,32 @@ const APTaskhandler = {
             
             // 统计有效 creep
             const validCreeps = this._countValidCreeps(roomName);
-            
-            // 1. harvest/upgrade/repair/attack/claim/claimupgrade/globalcarry: 每个任务对应一个 creep
-            const longTermTasks = ['harvest', 'upgrade', 'repair', 'attack', 'claim', 'claimupgrade', 'globalcarry'];
+
+            // 【新增】考虑等待中的 spawn 任务
+            const existingSpawnTasks = modules.taskboard.getTasks(roomName, 'Buildings');
+            const waitingSpawnTasks = existingSpawnTasks.filter(t => t.type === 'spawn' && !t.takenBy);
+
+            for (const task of waitingSpawnTasks) {
+                const model = task.data.model;
+                switch (model) {
+                    case 'AttackerI':
+                        validCreeps['police'] = (validCreeps['police'] || 0) + 1;
+                        break;
+                    case 'CarrierI':
+                        validCreeps['carry'] = (validCreeps['carry'] || 0) + 1;
+                        break;
+                    case 'ClaimerI':
+                        validCreeps['claim'] = (validCreeps['claim'] || 0) + 1;
+                        break;
+                    case 'CommonI':
+                        validCreeps['harvest'] = (validCreeps['harvest'] || 0) + 1;
+                        break;
+                }
+            }
+
+            // 1. repair/attack/claim/claimupgrade/globalcarry: 每个任务对应一个 creep
+            // 注意：harvest/upgrade 已由策略系统接管，此处不再生成 spawn 需求
+            const longTermTasks = ['repair', 'attack', 'claim', 'claimupgrade', 'globalcarry'];
             for (const taskType of longTermTasks) {
                 const needed = (taskCounts[taskType] || 0) - (validCreeps[taskType] || 0);
                 for (let i = 0; i < needed; i++) {
@@ -422,7 +467,16 @@ const APTaskhandler = {
             
             // 2. build: 计算建筑工地需要的能量，每 5K 对应一个 build 任务，每个任务对应一个 creep
             const buildTasks = tasks.filter(t => t.type === 'build');
-            const buildCreepsNeeded = this._calculateBuildCreeps(room, buildTasks.length);
+            let buildCreepsNeeded = this._calculateBuildCreeps(room, buildTasks.length);
+
+            // 【新增】考虑等待中的 spawn 任务（已在上方统计）
+            for (const task of waitingSpawnTasks) {
+                const model = task.data.model;
+                if (model === 'CommonI') {
+                    buildCreepsNeeded++;
+                }
+            }
+
             const currentBuildCreeps = validCreeps['build'] || 0;
             const needed = Math.max(0, buildCreepsNeeded - currentBuildCreeps);
             for (let i = 0; i < needed; i++) {
@@ -533,7 +587,7 @@ const APTaskhandler = {
     _calculateBuildCreeps: function(room, buildTaskCount) {
         const siteIds = modules.search.get.constructionSites(room.name);
         if (!siteIds || siteIds.length === 0) return 0;
-        
+
         let totalEnergy = 0;
         for (const siteId of siteIds) {
             const site = Game.getObjectById(siteId);
@@ -541,9 +595,16 @@ const APTaskhandler = {
                 totalEnergy += site.progressTotal;
             }
         }
-        
+
         // 每 5K 对应一个 build 任务，每个任务对应一个 creep
-        return Math.ceil(totalEnergy / 5000);
+        let buildCreepsNeeded = Math.ceil(totalEnergy / 5000);
+
+        // 【新增】低等级房间多分配 build creep（RCL ≤ 3 加一倍，RCL 4 以上正常）
+        if (room.controller && room.controller.level <= 3) {
+            buildCreepsNeeded = Math.ceil(buildCreepsNeeded * 2);
+        }
+
+        return buildCreepsNeeded;
     },
 
     /**

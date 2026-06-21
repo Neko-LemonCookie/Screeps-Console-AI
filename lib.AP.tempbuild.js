@@ -208,27 +208,10 @@ const libAPTempbuild = {
                 centerY = spawnY + 1;
             }
 
-            // 检查计算出的城市中心是否在有效范围内
-            if (centerX >= 0 && centerX <= 49 && centerY >= 0 && centerY <= 49) {
-                // 检查城市中心周围是否有足够空间
-                const terrain = Game.map.getRoomTerrain(roomName);
-                let hasEnoughSpace = true;
-                const checkRadius = Math.floor(size / 2);
-
-                for (let dx = -checkRadius; dx <= checkRadius && hasEnoughSpace; dx++) {
-                    for (let dy = -checkRadius; dy <= checkRadius && hasEnoughSpace; dy++) {
-                        const tx = centerX + dx;
-                        const ty = centerY + dy;
-                        if (tx < 0 || tx > 49 || ty < 0 || ty > 49) continue;
-                        if (terrain.get(tx, ty) === TERRAIN_MASK_WALL) {
-                            hasEnoughSpace = false;
-                        }
-                    }
-                }
-
-                if (hasEnoughSpace) {
-                    return new RoomPosition(centerX, centerY, roomName);
-                }
+            // 强制以 spawn 为锚点：只要中心在房间范围内就直接用，不做空间检查
+            // 避免因周围有墙导致整个布局偏移，spawn 不能动，布局必须围着它转
+            if (centerX >= 2 && centerX <= 47 && centerY >= 2 && centerY <= 47) {
+                return new RoomPosition(centerX, centerY, roomName);
             }
         }
 
@@ -339,6 +322,36 @@ const libAPTempbuild = {
     },
 
     /**
+     * 在目标位置附近找可建造的空位（用于模板位置撞墙时自动偏移）
+     * @private
+     */
+    _findNearbyBuildablePos: function(roomName, x, y, maxRange) {
+        const terrain = Game.map.getRoomTerrain(roomName);
+
+        // 按距离从近到远搜索，优先选最近的空位
+        for (let range = 1; range <= maxRange; range++) {
+            for (let dx = -range; dx <= range; dx++) {
+                for (let dy = -range; dy <= range; dy++) {
+                    if (Math.abs(dx) !== range && Math.abs(dy) !== range) continue;
+
+                    const tx = x + dx;
+                    const ty = y + dy;
+
+                    if (tx < 1 || tx > 48 || ty < 1 || ty > 48) continue;
+                    if (terrain.get(tx, ty) === TERRAIN_MASK_WALL) continue;
+
+                    const pos = new RoomPosition(tx, ty, roomName);
+                    if (pos.lookFor(LOOK_STRUCTURES).length > 0) continue;
+                    if (pos.lookFor(LOOK_CONSTRUCTION_SITES).length > 0) continue;
+
+                    return pos;
+                }
+            }
+        }
+        return null;
+    },
+
+    /**
      * 运行城市中心模板生成逻辑
      */
     runCityCenter: function(roomName) {
@@ -362,20 +375,48 @@ const libAPTempbuild = {
 
         const center = room.memory.cityCenter;
         const rcl = room.controller.level;
+        const terrain = Game.map.getRoomTerrain(roomName);
 
         // 1. 放置模板内的建筑
         for (let i = 1; i <= rcl; i++) {
             const builds = template[i];
             if (!builds) continue;
             for (const b of builds) {
-                const pos = new RoomPosition(center.x + b.x, center.y + b.y, roomName);
+                let pos = new RoomPosition(center.x + b.x, center.y + b.y, roomName);
+
+                // 撞墙容错：如果模板位置是墙，自动在周围 2 格内找最近空位偏移
+                if (terrain.get(pos.x, pos.y) === TERRAIN_MASK_WALL) {
+                    const offsetPos = this._findNearbyBuildablePos(roomName, pos.x, pos.y, 2);
+                    if (!offsetPos) continue; // 附近也没地方，跳过这个建筑
+                    pos = offsetPos;
+                }
+
                 if (pos.lookFor(LOOK_STRUCTURES).length === 0 && pos.lookFor(LOOK_CONSTRUCTION_SITES).length === 0) {
+                    // spawn 额外检查：数量达到当前 RCL 上限则跳过，避免反复报 -10
                     if (b.type === STRUCTURE_SPAWN) {
-                        room.createConstructionSite(pos, STRUCTURE_SPAWN, (b.name || "CoreI_") + Game.time);
-                    } else {
-                        room.createConstructionSite(pos, b.type);
+                        const maxSpawns = CONTROLLER_STRUCTURES[STRUCTURE_SPAWN][rcl];
+                        const currentSpawns = room.find(FIND_MY_SPAWNS).length +
+                                             room.find(FIND_CONSTRUCTION_SITES, { filter: { structureType: STRUCTURE_SPAWN } }).length;
+                        if (currentSpawns >= maxSpawns) continue;
                     }
-                    return true; // 每次只放一个
+
+                    let result;
+                    if (b.type === STRUCTURE_SPAWN) {
+                        result = room.createConstructionSite(pos, STRUCTURE_SPAWN, (b.name || "CoreI_") + Game.time);
+                    } else {
+                        result = room.createConstructionSite(pos, b.type);
+                    }
+                    if (result === OK) {
+                        return true; // 每次只放一个
+                    } else {
+                        // 创建失败，打印日志方便排查
+                        if (Game.time % 100 === 0) {
+                            console.log("[TempBuild] ⚠️ 模板建筑创建失败: " + b.type +
+                                       " at (" + pos.x + "," + pos.y + "), error: " + result +
+                                       " (RCL" + rcl + ", " + roomName + ")");
+                        }
+                        // 继续尝试下一个位置，不要卡在同一个失败点
+                    }
                 }
             }
         }

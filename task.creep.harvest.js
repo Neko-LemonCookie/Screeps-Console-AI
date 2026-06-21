@@ -11,29 +11,51 @@ const taskHarvest = {
      * @param {Creep} creep 
      */
     run: function(creep) {
-        const data = creep.memory.taskData;
-        if (!data) return;
-
-        // autoAssign: 动态分配 source 和 target
-        if (data.autoAssign) {
-            const sources = creep.room.find(FIND_SOURCES);
-            // 优先选择能量剩余多且槽位空闲的 source
-            let bestSource = null;
-            let bestScore = -1;
-            for (const src of sources) {
-                const nearbyCreeps = src.pos.findInRange(FIND_MY_CREEPS, 1, { filter: c => c.memory.taskType === 'harvest' }).length;
-                const score = src.energy - nearbyCreeps * 100;
-                if (score > bestScore) { bestScore = score; bestSource = src; }
-            }
-            if (bestSource) {
-                creep.memory.taskData = { sourceId: bestSource.id, targetId: 'base' };
-            } else {
-                return; // 没有可用 source
-            }
-            return this.run(creep); // 用新 data 重新执行
+        let data = creep.memory.taskData;
+        // 【修复】taskData 为空直接清任务，不要留着 taskType 站着不动
+        if (!data) {
+            taskHelper.completeTask(creep);
+            return;
         }
 
-        if (!data.sourceId || !data.targetId) return;
+        // autoAssign: 动态分配 source 和 target（每10tick重新计算一次，避免耗CPU）
+        // 【修复】如果数据不完整，强制重新分配，不管时间到没到
+        if (data.autoAssign && (!data.sourceId || !data.targetId || !creep.memory._lastSourceAssign || Game.time - creep.memory._lastSourceAssign > 10)) {
+                const sources = creep.room.find(FIND_SOURCES);
+                // 优先选择能量剩余多且槽位空闲的 source
+                let bestSource = null;
+                let bestScore = -1;
+                for (const src of sources) {
+                    const nearbyCreeps = src.pos.findInRange(FIND_MY_CREEPS, 1, { filter: c => c.memory.taskType === 'harvest' }).length;
+                    const score = src.energy - nearbyCreeps * 100;
+                    if (score > bestScore) { bestScore = score; bestSource = src; }
+                }
+
+                if (bestSource) {
+                    creep.memory.taskData = { sourceId: bestSource.id, targetId: 'base', autoAssign: true };
+                    creep.memory._lastSourceAssign = Game.time;
+                } else {
+                    // 【新增】如果没有可用 source，尝试使用默认 source（第一个 source）
+                    if (sources.length > 0) {
+                        console.log("[Harvest] ⚠️  autoAssign 失败，使用默认 source: " + sources[0].id);
+                        creep.memory.taskData = { sourceId: sources[0].id, targetId: 'base', autoAssign: true };
+                        creep.memory._lastSourceAssign = Game.time;
+                    } else {
+                        // 【新增】如果没有 source，清理任务并返回
+                        console.log("[Harvest] ❌ 房间没有能量源，清理任务: " + creep.name);
+                        taskHelper.completeTask(creep);
+                        return;
+                    }
+                }
+                // 重新获取最新的 data
+                data = creep.memory.taskData;
+        }
+
+        if (!data.sourceId || !data.targetId) {
+            console.log("[Harvest] ❌ 任务数据不完整: sourceId=" + data.sourceId + ", targetId=" + data.targetId + " (Creep: " + creep.name + ")");
+            taskHelper.completeTask(creep);
+            return;
+        }
 
         // 0. 强化 (Boost) 检查：如果房间内有 work 强化任务，且自身 TTL 足够，则转换任务
         if (creep.ticksToLive > 1200) {
@@ -103,7 +125,19 @@ const taskHarvest = {
         }
 
         if (result === ERR_NOT_IN_RANGE) {
-            creep.moveTo(source, { visualizePathStyle: { stroke: '#ffaa00' } });
+            creep.moveTo(source, { 
+                reusePath: 10,
+                visualizePathStyle: { stroke: '#ffaa00' } 
+            });
+        } else if (result === ERR_NOT_ENOUGH_RESOURCES) {
+            // 【修复】source 能量耗尽，移到旁边等着刷新，别站路中间挡道
+            if (!creep.pos.isNearTo(source)) {
+                creep.moveTo(source, { 
+                    reusePath: 5,
+                    visualizePathStyle: { stroke: '#aaaaaa' } 
+                });
+            }
+            creep.say('⏳ 等刷新');
         }
     },
 
@@ -142,7 +176,10 @@ const taskHarvest = {
         if (smartTarget) {
             var result = creep.transfer(smartTarget, RESOURCE_ENERGY);
             if (result === ERR_NOT_IN_RANGE) {
-                creep.moveTo(smartTarget, { visualizePathStyle: { stroke: '#00ff00' } });
+                creep.moveTo(smartTarget, { 
+                    reusePath: 10,
+                    visualizePathStyle: { stroke: '#00ff00' } 
+                });
             } else if (result === OK) {
                 // 存入容器后不清除任务！继续采矿循环（working状态切换回false后会继续采）
                 creep.memory.working = false;
@@ -153,38 +190,82 @@ const taskHarvest = {
 
         // 4. 没有容器时的原有逻辑：送往base或指定目标
         if (targetId === 'base') {
-            var target = creep.pos.findClosestByPath(FIND_STRUCTURES, {
-                filter: function(s) {
-                    return (s.structureType === STRUCTURE_EXTENSION || s.structureType === STRUCTURE_SPAWN) &&
-                           s.store.getFreeCapacity(RESOURCE_ENERGY) > 0;
+            // 【优化】缓存存储目标，避免每tick都findClosestByPath耗CPU
+            let target = null;
+            if (creep.memory._depositTargetId) {
+                target = Game.getObjectById(creep.memory._depositTargetId);
+                // 缓存失效：目标不存在或满了，重新找
+                if (!target || target.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+                    target = null;
+                    delete creep.memory._depositTargetId;
                 }
-            });
-            if (target) {
-                var result2 = creep.transfer(target, RESOURCE_ENERGY);
-                if (result2 === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(target, { visualizePathStyle: { stroke: '#ffffff' } });
-                } else if (result2 === OK) {
-                    taskHelper.completeTask(creep);
-                }
-            } else {
-                // base满了，找Storage/Container
-                var fallback = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+            }
+            
+            if (!target) {
+                target = creep.pos.findClosestByPath(FIND_STRUCTURES, {
                     filter: function(s) {
-                        return (s.structureType === STRUCTURE_CONTAINER ||
-                                s.structureType === STRUCTURE_STORAGE ||
-                                s.structureType === STRUCTURE_LINK) &&
+                        return (s.structureType === STRUCTURE_EXTENSION || s.structureType === STRUCTURE_SPAWN) &&
                                s.store.getFreeCapacity(RESOURCE_ENERGY) > 0;
                     }
                 });
-                if (fallback) {
-                    var result3 = creep.transfer(fallback, RESOURCE_ENERGY);
-                    if (result3 === ERR_NOT_IN_RANGE) {
-                        creep.moveTo(fallback, { visualizePathStyle: { stroke: '#ffffff' } });
-                    } else if (result3 === OK) {
-                        taskHelper.completeTask(creep);
-                    }
+                if (target) {
+                    creep.memory._depositTargetId = target.id;
                 }
             }
+            
+            if (target) {
+                var result2 = creep.transfer(target, RESOURCE_ENERGY);
+                if (result2 === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(target, { 
+                        reusePath: 10,
+                        visualizePathStyle: { stroke: '#ffffff' } 
+                    });
+                } else if (result2 === OK) {
+                    delete creep.memory._depositTargetId; // 存完清空缓存
+                    taskHelper.completeTask(creep);
+                }
+            } else {
+        // 【新增】base 满了，尝试寻找其他存储目标
+        var fallback = null;
+        if (creep.memory._fallbackTargetId) {
+            fallback = Game.getObjectById(creep.memory._fallbackTargetId);
+            if (!fallback || fallback.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+                fallback = null;
+                delete creep.memory._fallbackTargetId;
+            }
+        }
+        
+        if (!fallback) {
+            fallback = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+                filter: function(s) {
+                    return (s.structureType === STRUCTURE_CONTAINER ||
+                            s.structureType === STRUCTURE_STORAGE ||
+                            s.structureType === STRUCTURE_LINK) &&
+                           s.store.getFreeCapacity(RESOURCE_ENERGY) > 0;
+                }
+            });
+            if (fallback) {
+                creep.memory._fallbackTargetId = fallback.id;
+            }
+        }
+
+        if (fallback) {
+            var result3 = creep.transfer(fallback, RESOURCE_ENERGY);
+            if (result3 === ERR_NOT_IN_RANGE) {
+                creep.moveTo(fallback, { 
+                    reusePath: 10,
+                    visualizePathStyle: { stroke: '#ffffff' } 
+                });
+            } else if (result3 === OK) {
+                delete creep.memory._fallbackTargetId;
+                taskHelper.completeTask(creep);
+            }
+        } else {
+            // 【新增】所有存储目标都满了，清理任务
+            console.log("[Harvest] ❌ 所有存储目标都满了，清理任务: " + creep.name);
+            taskHelper.completeTask(creep);
+        }
+    }
             return;
         }
 
@@ -198,7 +279,10 @@ const taskHarvest = {
 
         var result4 = creep.transfer(idTarget, RESOURCE_ENERGY);
         if (result4 === ERR_NOT_IN_RANGE) {
-            creep.moveTo(idTarget, { visualizePathStyle: { stroke: '#ffffff' } });
+            creep.moveTo(idTarget, { 
+                reusePath: 10,
+                visualizePathStyle: { stroke: '#ffffff' } 
+            });
         } else if (result4 === OK) {
             taskHelper.completeTask(creep);
         }

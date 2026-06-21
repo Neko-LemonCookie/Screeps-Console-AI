@@ -20,12 +20,26 @@ const taskUpgrade = {
             if (source) {
                 creep.memory.taskData = { targetId: source.id };
             } else {
-                return; // 没有可用能量来源
+                // 【新增】如果没有可用能量来源，尝试使用默认 source
+                const sources = creep.room.find(FIND_SOURCES);
+                if (sources.length > 0 && sources[0].energy > 0) {
+                    console.log("[Upgrade] ⚠️  autoAssign 失败，使用默认 source: " + sources[0].id);
+                    creep.memory.taskData = { targetId: sources[0].id };
+                } else {
+                    // 【新增】如果没有 source，清理任务并返回
+                    console.log("[Upgrade] ❌ 房间没有可用能量来源，清理任务: " + creep.name);
+                    taskHelper.completeTask(creep);
+                    return;
+                }
             }
             return this.run(creep);
         }
 
-        if (!data.targetId) return;
+        if (!data.targetId) {
+            console.log("[Upgrade] ❌ 任务数据不完整: targetId=" + data.targetId + " (Creep: " + creep.name + ")");
+            taskHelper.completeTask(creep);
+            return;
+        }
 
         // 状态切换：完成一次升级循环（背包空）则结束任务
         if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {

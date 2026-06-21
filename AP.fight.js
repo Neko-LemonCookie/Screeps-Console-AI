@@ -11,19 +11,20 @@ const APFight = {
     THREAT_LEVELS: { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 },
 
     CONFIG: {
-        ENABLED: false,  // 赛季服侦察Creep太多，前期关闭防御响应
         ENEMY_THRESHOLDS: { MEDIUM: 1, HIGH: 3, CRITICAL: 5 },
         DEFENDER_COUNT: { MEDIUM: 2, HIGH: 4, CRITICAL: 6 },
         EMERGENCY_MODE_DURATION: 1000,
-        COOLDOWN_BETWEEN_DEPLOYMENTS: 50
+        COOLDOWN_BETWEEN_DEPLOYMENTS: 50,
+        MIN_RCL_FOR_DEFENSE: 4,           // RCL ≤ 3 不启用防御
+        BIG_HOSTILE_BODY_MIN: 10          // 单个敌人体部件数 ≥ 此值视为大块头
     },
 
     run: function() {
-        if (!this.CONFIG.ENABLED) return;  // 防御模块已关闭
-
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName];
             if (!room.controller || !room.controller.my) continue;
+            // RCL ≤ 3 不启用防御
+            if (room.controller.level < this.CONFIG.MIN_RCL_FOR_DEFENSE) continue;
 
             const threatLevel = this._assessThreats(room);
 
@@ -63,10 +64,16 @@ const APFight = {
 
         if (enemies.length === 0) return this.THREAT_LEVELS.LOW;
 
+        // 检查是否有大块头（10+ 部件）
+        let hasBigHostile = false;
         let attackingCount = 0;
         for (const enemy of enemies) {
+            if (enemy.body.length >= this.CONFIG.BIG_HOSTILE_BODY_MIN) hasBigHostile = true;
             if (this._isAttackingStructure(enemy, room)) attackingCount++;
         }
+
+        // 不足3个 且 没有大块头 → 不管（侦察兵而已）
+        if (enemies.length < 3 && !hasBigHostile) return this.THREAT_LEVELS.LOW;
 
         if (enemies.length >= this.CONFIG.ENEMY_THRESHOLDS.CRITICAL ||
             attackingCount >= this.CONFIG.ENEMY_THRESHOLDS.CRITICAL) {

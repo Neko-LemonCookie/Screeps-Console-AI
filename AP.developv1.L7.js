@@ -18,8 +18,8 @@ const DevelopV1_L7 = {
 
     run: function(room) {
         try {
+            if (Game.time % 2 !== 0) return;
             const state = this.analyze(room);
-            if (!this._shouldRefresh(room)) return;
             this._publishCreepNeeds(room, state);
             this._checkMilestone(room, state);
         } catch (e) { console.log("[DevelopV1-L7] ERROR:", e.message); }
@@ -35,12 +35,6 @@ const DevelopV1_L7 = {
             controllerProgress: room.controller.progress / room.controller.progressTotal,
             terminalAvailable: !!room.terminal, factoryAvailable: !!room.factory
         };
-    },
-
-    _shouldRefresh: function(room) {
-        const last = room.memory.lastStrategyRefresh || 0;
-        if (Game.time - last >= this.CONFIG.REFRESH_INTERVAL) { room.memory.lastStrategyRefresh = Game.time; return true; }
-        return false;
     },
 
     _publishCreepNeeds: function(room, state) {
