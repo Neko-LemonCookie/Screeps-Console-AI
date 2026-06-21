@@ -15,16 +15,31 @@ const APFight = {
         DEFENDER_COUNT: { MEDIUM: 2, HIGH: 4, CRITICAL: 6 },
         EMERGENCY_MODE_DURATION: 1000,
         COOLDOWN_BETWEEN_DEPLOYMENTS: 50,
-        MIN_RCL_FOR_DEFENSE: 4,           // RCL ≤ 3 不启用防御
-        BIG_HOSTILE_BODY_MIN: 10          // 单个敌人体部件数 ≥ 此值视为大块头
+        MIN_RCL_FOR_DEFENSE: 4,           // RCL ≤ 3 不启用常规防御
+        BIG_HOSTILE_BODY_MIN: 10,         // 单个敌人体部件数 ≥ 此值视为大块头
+        SAFE_MODE_COOLDOWN: 20000,        // 安全模式尝试冷却（避免反复调用）
+        SAFE_MODE_MAX_ROOMS: 1            // 仅拥有 ≤ 此数量房间时才启用安全模式
     },
 
     run: function() {
+        // 统计拥有的房间数量
+        let ownedRoomCount = 0;
+        for (const rn in Game.rooms) {
+            const r = Game.rooms[rn];
+            if (r.controller && r.controller.my) ownedRoomCount++;
+        }
+
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName];
             if (!room.controller || !room.controller.my) continue;
-            // RCL ≤ 3 不启用防御
-            if (room.controller.level < this.CONFIG.MIN_RCL_FOR_DEFENSE) continue;
+
+            const rcl = room.controller.level;
+
+            // RCL ≤ 3：尝试安全模式保护（不启用常规防御）
+            if (rcl < this.CONFIG.MIN_RCL_FOR_DEFENSE) {
+                this._trySafeMode(room, ownedRoomCount);
+                continue;
+            }
 
             const threatLevel = this._assessThreats(room);
 
@@ -51,6 +66,53 @@ const APFight = {
             if (!room.memory.threat) room.memory.threat = {};
             room.memory.threat.level = threatLevel;
             room.memory.threat.lastAssess = Game.time;
+        }
+    },
+
+    /**
+     * 低RCL安全模式保护
+     * RCL ≤ 3 且只有一个房间时，遇到有威胁的敌人自动启动安全模式
+     */
+    _trySafeMode: function(room, ownedRoomCount) {
+        // 仅拥有少量房间时才启用（避免浪费安全模式）
+        if (ownedRoomCount > this.CONFIG.SAFE_MODE_MAX_ROOMS) return;
+
+        // 冷却检查
+        if (!room.memory.safeMode) room.memory.safeMode = {};
+        const lastTry = room.memory.safeMode.lastTry || 0;
+        if (Game.time - lastTry < this.CONFIG.SAFE_MODE_COOLDOWN) return;
+
+        // 检查是否有敌人
+        const enemies = room.find(FIND_HOSTILE_CREEPS, {
+            filter: creep => !creep.owner.friend
+        });
+        if (enemies.length === 0) return;
+
+        // 检查敌人是否有威胁部件（ATTACK / RANGED_ATTACK / WORK）
+        let hasThreat = false;
+        for (const enemy of enemies) {
+            if (enemy.getActiveBodyparts(ATTACK).length > 0 ||
+                enemy.getActiveBodyparts(RANGED_ATTACK).length > 0 ||
+                enemy.getActiveBodyparts(WORK).length > 0) {
+                hasThreat = true;
+                break;
+            }
+        }
+        if (!hasThreat) return;
+
+        // 尝试启动安全模式
+        const result = room.controller.activateSafeMode();
+        room.memory.safeMode.lastTry = Game.time;
+
+        if (result === OK) {
+            console.log("[Fight] 🛡️ 安全模式已启动: " + room.name +
+                       " (RCL" + room.controller.level +
+                       ", 敌人: " + enemies.length + ")");
+        } else {
+            if (Game.time % 100 === 0) {
+                console.log("[Fight] ⚠️ 安全模式启动失败: " + room.name +
+                           " 错误码: " + result);
+            }
         }
     },
 

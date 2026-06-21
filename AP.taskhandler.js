@@ -106,7 +106,7 @@ const APTaskhandler = {
      */
     _handleNeedCreeps: function(taskboard, roomName, strategyTask) {
         const model = strategyTask.data && strategyTask.data.model;
-        const deficit = strategyTask.data && strategyTask.data.count;  // 策略层传的是差值（还需多少个）
+        let deficit = strategyTask.data && strategyTask.data.count;  // 策略层传的是差值（还需多少个）
         const priority = (strategyTask.data && strategyTask.data.priority) || 'harvest';
         const taskOnly = strategyTask.data && strategyTask.data.data && strategyTask.data.data.taskOnly;
         const spawnOnly = strategyTask.data && strategyTask.data.data && strategyTask.data.data.spawnOnly;
@@ -136,8 +136,8 @@ const APTaskhandler = {
 
         // 用房间实际能量容量计算模板能量值
         const adapter = require('adapter.wasm_spawncreep');
-        const room = Game.rooms[roomName];
-        const roomEnergyCap = room ? room.energyCapacityAvailable : 300;
+        const roomObj = Game.rooms[roomName];
+        const roomEnergyCap = roomObj ? roomObj.energyCapacityAvailable : 300;
         var energy;
         switch (model) {
             case 'CommonI': energy = adapter.calcBodyCost(adapter.getCommonIBody(roomEnergyCap)); break;
@@ -170,7 +170,18 @@ const APTaskhandler = {
         }
 
         // 每次最多补3个
-        const spawnCount = Math.min(deficit, 3);
+        let spawnCount = Math.min(deficit, 3);
+        
+        // 【新增】全局节流：只有未领取任务数 > 空闲creep数 + 2 时才制造新creep，防止超额
+        if (roomObj) {
+            const allTasks = modules.taskboard.getTasks(roomName, 'Creeps') || [];
+            const unclaimedTasks = allTasks.filter(t => !t.takenBy).length;
+            const idleCreeps = roomObj.find(FIND_MY_CREEPS).filter(c => !c.memory.taskType || c.memory.taskType === 'unibot').length;
+            if (unclaimedTasks <= idleCreeps + 2) {
+                spawnCount = 0; // 任务积压不够，不造新的
+            }
+        }
+        
         for (var i = 0; i < spawnCount; i++) {
             taskboard.buildings.spawn(roomName, model, priority, { energy: energy, model: model });
         }
@@ -509,6 +520,13 @@ const APTaskhandler = {
             
             // 按优先级排序
             needs.sort((a, b) => a.priority - b.priority);
+            
+            // 【新增】全局节流：只有未领取任务数 > 空闲creep数 + 2 时才制造新creep，防止超额
+            const unclaimedTasks = tasks.filter(t => !t.takenBy).length;
+            const idleCreeps = room.find(FIND_MY_CREEPS).filter(c => !c.memory.taskType || c.memory.taskType === 'unibot').length;
+            if (unclaimedTasks <= idleCreeps + 2) {
+                needs.length = 0; // 清空数组，不重新赋值
+            }
             
             if (needs.length > 0) {
                 creepNeeds[roomName] = needs;

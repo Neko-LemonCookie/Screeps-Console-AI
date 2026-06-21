@@ -18,17 +18,55 @@ const taskHarvest = {
             return;
         }
 
-        // autoAssign: 动态分配 source 和 target（每10tick重新计算一次，避免耗CPU）
-        // 【修复】如果数据不完整，强制重新分配，不管时间到没到
-        if (data.autoAssign && (!data.sourceId || !data.targetId || !creep.memory._lastSourceAssign || Game.time - creep.memory._lastSourceAssign > 10)) {
+        // autoAssign: 动态分配 source 和 target
+        // 【修复】只有第一次分配或当前source枯竭时才重新计算，避免挖一半换矿点
+        let needReassign = false;
+        if (data.autoAssign) {
+            if (!data.sourceId || !data.targetId || !creep.memory._lastSourceAssign) {
+                needReassign = true;
+            } else {
+                // 检查当前 source 是否枯竭
+                const currentSource = Game.getObjectById(data.sourceId);
+                if (currentSource && currentSource.energy === 0) {
+                    needReassign = true;
+                }
+            }
+        }
+        
+        if (needReassign) {
                 const sources = creep.room.find(FIND_SOURCES);
-                // 优先选择能量剩余多且槽位空闲的 source
+                const spawns = creep.room.find(FIND_MY_SPAWNS);
+                const spawn = spawns.length > 0 ? spawns[0] : null;
+                
                 let bestSource = null;
-                let bestScore = -1;
-                for (const src of sources) {
-                    const nearbyCreeps = src.pos.findInRange(FIND_MY_CREEPS, 1, { filter: c => c.memory.taskType === 'harvest' }).length;
-                    const score = src.energy - nearbyCreeps * 100;
-                    if (score > bestScore) { bestScore = score; bestSource = src; }
+                
+                if (spawn && sources.length > 0) {
+                    // 按离 spawn 的直线距离排序
+                    const sortedSources = sources.slice().sort((a, b) => {
+                        return spawn.pos.getRangeTo(a) - spawn.pos.getRangeTo(b);
+                    });
+                    
+                    // 逐个寻路测试，第一个能到达的就选
+                    for (const src of sortedSources) {
+                        const path = spawn.pos.findPathTo(src, {
+                            ignoreCreeps: true,
+                            maxOps: 500,
+                            plainCost: 2,
+                            swampCost: 10
+                        });
+                        if (path && path.length > 0) {
+                            bestSource = src;
+                            break;
+                        }
+                    }
+                    
+                    // 兜底：所有都找不到路径就选最近的那个
+                    if (!bestSource) {
+                        bestSource = sortedSources[0];
+                    }
+                } else if (sources.length > 0) {
+                    // 没有 spawn，随便选第一个
+                    bestSource = sources[0];
                 }
 
                 if (bestSource) {

@@ -9,6 +9,7 @@ function getStrategy(rcl) {
     if (!strategyCache[key]) {
         // RCL到策略文件的映射表（每个RCL都有明确映射，避免fallback到null）
         const strategyMap = {
+            1: 'AP.developv1.L3',   // RCL 1: 冷启动，使用L3策略
             2: 'AP.developv1.L3',   // RCL 2: 早期，使用L3策略
             3: 'AP.developv1.L3',   // RCL 3-4: 早期，无Storage
             4: 'AP.developv1.L3',
@@ -44,3 +45,4 @@ const DevelopV1 = {
 };
 
 module.exports = DevelopV1;
+;

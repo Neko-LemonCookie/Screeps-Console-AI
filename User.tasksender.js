@@ -232,6 +232,38 @@ const UserTasksender = {
     },
 
     /**
+     * 处决所有空闲 creep（没有任务的），自刎归天
+     * @param {string} roomName 房间名（可选，不传则处决所有房间的空闲 creep）
+     */
+    cleancreep: function(roomName) {
+        let creeps;
+        if (roomName) {
+            const room = Game.rooms[roomName];
+            if (!room || !room.controller || !room.controller.my) {
+                console.log("[UserTasksender] ❌ 无效的房间: " + roomName);
+                return;
+            }
+            creeps = room.find(FIND_MY_CREEPS);
+        } else {
+            creeps = Game.creeps;
+        }
+
+        let count = 0;
+        for (const name in creeps) {
+            const creep = creeps[name];
+            const taskType = creep.memory.taskType;
+            // 没有任务、或者是 unibot 空闲状态的，都算空闲
+            if (!taskType || taskType === 'unibot' || !creep.memory.taskData) {
+                creep.suicide();
+                count++;
+                console.log("[UserTasksender] ⚔️ 处决空闲 creep: " + creep.name);
+            }
+        }
+
+        console.log("[UserTasksender] ✅ 处决完成，共清理 " + count + " 个空闲 creep");
+    },
+
+    /**
      * 显示帮助信息
      */
     help: function() {
@@ -250,6 +282,7 @@ const UserTasksender = {
         console.log("  Game.tasksender.removeTask(roomName, category, typeOrIndex)");
         console.log("  Game.tasksender.listTasks(roomName, category)");
         console.log("  Game.tasksender.clearTasks(roomName, category)");
+        console.log("  Game.tasksender.cleancreep([roomName])  - 处决所有空闲 creep");
         console.log("  Game.tasksender.help()");
         console.log("");
         console.log("📌 示例:");
@@ -258,6 +291,8 @@ const UserTasksender = {
         console.log("  Game.tasksender.listTasks('W1N1', 'all')");
         console.log("  Game.tasksender.removeTask('W1N1', 'Creeps', 0)");
         console.log("  Game.tasksender.clearTasks('W1N1', 'all')");
+        console.log("  Game.tasksender.cleancreep()           - 处决所有房间的空闲 creep");
+        console.log("  Game.tasksender.cleancreep('W1N1')     - 只处决 W1N1 的空闲 creep");
         console.log("---------------------------");
     }
 };

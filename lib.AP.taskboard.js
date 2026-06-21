@@ -10,6 +10,9 @@ const libAPTaskboard = {
      * @private
      */
     _ensureRoom: function(category, roomName) {
+        if (!Memory.Taskboard) Memory.Taskboard = {};
+        if (!Memory.Taskboard.Task) Memory.Taskboard.Task = {};
+        if (!Memory.Taskboard.Task[category]) Memory.Taskboard.Task[category] = {};
         if (!Memory.Taskboard.Task[category][roomName]) {
             Memory.Taskboard.Task[category][roomName] = [];
         }

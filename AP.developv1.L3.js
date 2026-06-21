@@ -39,8 +39,21 @@ const DevelopV1_L3 = {
         const current = state.commonICount;
 
         const sourceCount = state.sourceCount || 2;
-        const harvestCount = 3;
-        const upgradeCount = 6;
+        const harvestCount = 3;  // 收获者保底3个
+        const baseUpgradeCount = 6;
+        const buildQuota = Math.floor(baseUpgradeCount / 2);  // 从upgrade拿一半作为建造者必须额度
+        
+        // 根据是否有工地动态分配upgrade和build的额度
+        let upgradeCount, buildCount;
+        if (state.constructionSites > 0) {
+            // 有工地：建造者占一半额度
+            buildCount = buildQuota;
+            upgradeCount = baseUpgradeCount - buildQuota;
+        } else {
+            // 没工地：建造者额度全部还给升级者
+            buildCount = 0;
+            upgradeCount = baseUpgradeCount;
+        }
 
         // ====== Spawn 需求（只在缺人时创建）======
         if (current < config.minCount) {
@@ -55,6 +68,9 @@ const DevelopV1_L3 = {
         // ====== 任务分发：直接写入 Creeps 任务板 ======
         this._ensureCreepTasks(taskboard, room.name, 'harvest', harvestCount);
         this._ensureCreepTasks(taskboard, room.name, 'upgrade', upgradeCount);
+        if (buildCount > 0) {
+            this._ensureCreepTasks(taskboard, room.name, 'build', buildCount);
+        }
     },
 
     _ensureCreepTasks: function(taskboard, roomName, taskType, targetCount) {

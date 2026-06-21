@@ -17,6 +17,39 @@ module.exports.loop = function () {
         STEP = 'memcleaner';
         modules.memcleaner.run();
 
+        // 1.5 安全模式自动启动（保命逻辑）
+        STEP = 'safeModeCheck';
+        const myRooms = [];
+        for (const rn in Game.rooms) {
+            const r = Game.rooms[rn];
+            if (r.controller && r.controller.my) myRooms.push(r);
+        }
+        // 仅当只有1个房间且RCL<=3时才触发（早期保命）
+        if (myRooms.length === 1) {
+            const room = myRooms[0];
+            if (room.controller.level <= 3) {
+                // 20000 tick 时间锁，避免一直尝试浪费CPU
+                if (!Memory.lastSafeModeAttempt || Game.time - Memory.lastSafeModeAttempt > 20000) {
+                    const enemies = room.find(FIND_HOSTILE_CREEPS);
+                    if (enemies.length > 0) {
+                        // 检查敌人是否有攻击性部件或WORK（WORK可以拆建筑）
+                        const dangerous = enemies.some(c =>
+                            c.body.some(p => p.type === ATTACK || p.type === RANGED_ATTACK || p.type === WORK)
+                        );
+                        if (dangerous) {
+                            Memory.lastSafeModeAttempt = Game.time;
+                            const result = room.controller.activateSafeMode();
+                            if (result === OK) {
+                                console.log("[SafeMode] 🛡️ 安全模式已启动！(" + room.name + ")");
+                            } else {
+                                console.log("[SafeMode] ⚠️ 启动失败: " + result + " (" + room.name + ")");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 2. 全局决策AI运行
         STEP = 'developv1';
         modules.developv1.run();

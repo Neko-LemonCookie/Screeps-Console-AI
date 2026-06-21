@@ -8,6 +8,9 @@ function getStrategy(rcl) {
     if (!strategyCache[key]) {
         // 小房间(5x5)策略映射：每个RCL都有明确映射
         const strategyMap = {
+            1: 'AP.developv2.L4',   // RCL 1-3: 冷启动/早期，复用L4策略
+            2: 'AP.developv2.L4',
+            3: 'AP.developv2.L4',
             4: 'AP.developv2.L4',   // RCL 4: 刚建Storage
             5: 'AP.developv2.L5',   // RCL 5: Storage稳定运行
             6: 'AP.developv2.L5',   // RCL 6: 解锁Terminal/Lab，但小房间策略不变
