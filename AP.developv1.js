@@ -12,57 +12,72 @@ function checkEmergencyMode(room) {
     const creepCount = room.find(FIND_MY_CREEPS).length;
     const cap = room.energyCapacityAvailable;
     const avail = room.energyAvailable;
-    const halfCap = Math.floor(cap / 2);
 
-    // 已有足够creep且能量过半 → 正常退出紧急模式
-    if (creepCount >= 2 && avail >= halfCap) {
-        if (room.memory._emergencyMode) {
-            delete room.memory._emergencyMode;
-            console.log("[" + room.name + "] 🟢 紧急模式退出，creep=" + creepCount + " 能量=" + avail + "/" + cap);
-        }
+    const isActive = !!room.memory._emergencyMode;
+    const activeSince = room.memory._emergencyMode || 0;
+    const duration = Game.time - activeSince;
+
+    // 强制超时退出（500tick足够造出多个creep了）
+    if (isActive && duration > 500) {
+        delete room.memory._emergencyMode;
+        delete room.memory._isEmergencyMode;
+        console.log("[" + room.name + "] 🟢 紧急模式强制退出(超时)，creep=" + creepCount);
         return false;
     }
 
-    // 触发条件：无creep 或 能量严重不足（<容量的1/4）且creep太少
-    if (creepCount === 0 || (avail < Math.floor(cap / 4) && creepCount < 3)) {
-        if (!room.memory._emergencyMode) {
-            room.memory._emergencyMode = Game.time;
-            console.log("[" + room.name + "] 🔴 紧急模式激活！creep=" + creepCount + " 能量=" + avail + "/" + cap);
-        }
-    } else if (!room.memory._emergencyMode) {
-        return false; // 不满足紧急条件且未激活
+    // 正常退出：有足够人手且能量不太差（25%即可，不再要求50%）
+    if (isActive && creepCount >= 2 && avail >= Math.floor(cap / 4)) {
+        delete room.memory._emergencyMode;
+        delete room.memory._isEmergencyMode;
+        console.log("[" + room.name + "] 🟢 紧急模式退出，creep=" + creepCount + " 能量=" + avail + "/" + cap);
+        return false;
+    }
+
+    // 触发条件：只有真没人的时候才激活（不再因临时能量低谷误触！）
+    if (!isActive && creepCount === 0) {
+        room.memory._emergencyMode = Game.time;
+        console.log("[" + room.name + "] 🔴 紧急模式激活！creep=0 能量=" + avail + "/" + cap);
+    } else if (!isActive) {
+        return false; // 有人且未激活 → 走正常策略
     }
 
     // ====== 紧急模式执行 ======
     const taskboard = require('lib.AP.taskboard');
 
-    // 1. 清除该房间所有旧策略任务和spawn任务，避免冲突
-    if (Memory.Taskboard && Memory.Taskboard.Task) {
-        if (Memory.Taskboard.Task.Strategy && Memory.Taskboard.Task.Strategy[room.name]) {
-            Memory.Taskboard.Task.Strategy[room.name] = [];
-        }
-        if (Memory.Taskboard.Task.Buildings && Memory.Taskboard.Task.Buildings[room.name]) {
-            // 只清除spawn任务，保留produce/market等其他建筑任务
-            Memory.Taskboard.Task.Buildings[room.name] =
-                (Memory.Taskboard.Task.Buildings[room.name] || []).filter(t => t.type !== 'spawn');
+    // 标记紧急状态，让taskhandler的Path B跳过
+    room.memory._isEmergencyMode = true;
+
+    // 清除旧任务（每5tick一次，避免每tick重置）
+    if (Game.time % 5 === 0) {
+        if (Memory.Taskboard && Memory.Taskboard.Task) {
+            if (Memory.Taskboard.Task.Strategy && Memory.Taskboard.Task.Strategy[room.name]) {
+                Memory.Taskboard.Task.Strategy[room.name] = [];
+            }
+            if (Memory.Taskboard.Task.Buildings && Memory.Taskboard.Task.Buildings[room.name]) {
+                Memory.Taskboard.Task.Buildings[room.name] =
+                    (Memory.Taskboard.Task.Buildings[room.name] || []).filter(t => t.type !== 'spawn');
+            }
         }
     }
 
-    // 2. 按当前实际可用能量生成CommonI任务（动态体型）
+    // 按实际可用能量动态决定体型（不再硬编码small！）
     const targetCreeps = 8;
-    const currentCreeps = creepCount;
-    const needCount = Math.min(targetCreeps - currentCreeps, 3); // 每次最多补3个避免队列爆炸
+    const needCount = Math.min(targetCreeps - creepCount, 2);
     if (needCount > 0 && avail >= 200) {
+        let bodySize = 'small';
+        if (avail >= 800) bodySize = 'large';
+        else if (avail >= 400) bodySize = 'medium';
+
         for (let i = 0; i < needCount; i++) {
             taskboard.strategy.needCreeps(room.name, {
                 model: 'CommonI', count: 1,
                 priority: 'harvest',
-                data: { bodySize: 'small', urgent: true, emergencyMode: true }
+                data: { bodySize: bodySize, urgent: true, emergencyMode: true }
             });
         }
     }
 
-    return true; // 告诉调用方跳过正常策略
+    return true;
 }
 
 function getStrategy(rcl) {

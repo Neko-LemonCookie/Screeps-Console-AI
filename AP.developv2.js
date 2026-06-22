@@ -10,45 +10,59 @@ function checkEmergencyMode(room) {
     const creepCount = room.find(FIND_MY_CREEPS).length;
     const cap = room.energyCapacityAvailable;
     const avail = room.energyAvailable;
-    const halfCap = Math.floor(cap / 2);
 
-    if (creepCount >= 2 && avail >= halfCap) {
-        if (room.memory._emergencyMode) {
-            delete room.memory._emergencyMode;
-            console.log("[" + room.name + "] 🟢 紧急模式退出，creep=" + creepCount + " 能量=" + avail + "/" + cap);
-        }
+    const isActive = !!room.memory._emergencyMode;
+    const activeSince = room.memory._emergencyMode || 0;
+    const duration = Game.time - activeSince;
+
+    if (isActive && duration > 500) {
+        delete room.memory._emergencyMode;
+        delete room.memory._isEmergencyMode;
+        console.log("[" + room.name + "] 🟢 紧急模式强制退出(超时)，creep=" + creepCount);
         return false;
     }
 
-    if (creepCount === 0 || (avail < Math.floor(cap / 4) && creepCount < 3)) {
-        if (!room.memory._emergencyMode) {
-            room.memory._emergencyMode = Game.time;
-            console.log("[" + room.name + "] 🔴 紧急模式激活！creep=" + creepCount + " 能量=" + avail + "/" + cap);
-        }
-    } else if (!room.memory._emergencyMode) {
+    if (isActive && creepCount >= 2 && avail >= Math.floor(cap / 4)) {
+        delete room.memory._emergencyMode;
+        delete room.memory._isEmergencyMode;
+        console.log("[" + room.name + "] 🟢 紧急模式退出，creep=" + creepCount + " 能量=" + avail + "/" + cap);
+        return false;
+    }
+
+    if (!isActive && creepCount === 0) {
+        room.memory._emergencyMode = Game.time;
+        console.log("[" + room.name + "] 🔴 紧急模式激活！creep=0 能量=" + avail + "/" + cap);
+    } else if (!isActive) {
         return false;
     }
 
     const taskboard = require('lib.AP.taskboard');
+    room.memory._isEmergencyMode = true;
 
-    if (Memory.Taskboard && Memory.Taskboard.Task) {
-        if (Memory.Taskboard.Task.Strategy && Memory.Taskboard.Task.Strategy[room.name]) {
-            Memory.Taskboard.Task.Strategy[room.name] = [];
-        }
-        if (Memory.Taskboard.Task.Buildings && Memory.Taskboard.Task.Buildings[room.name]) {
-            Memory.Taskboard.Task.Buildings[room.name] =
-                (Memory.Taskboard.Task.Buildings[room.name] || []).filter(t => t.type !== 'spawn');
+    if (Game.time % 5 === 0) {
+        if (Memory.Taskboard && Memory.Taskboard.Task) {
+            if (Memory.Taskboard.Task.Strategy && Memory.Taskboard.Task.Strategy[room.name]) {
+                Memory.Taskboard.Task.Strategy[room.name] = [];
+            }
+            if (Memory.Taskboard.Task.Buildings && Memory.Taskboard.Task.Buildings[room.name]) {
+                Memory.Taskboard.Task.Buildings[room.name] =
+                    (Memory.Taskboard.Task.Buildings[room.name] || []).filter(t => t.type !== 'spawn');
+            }
         }
     }
 
     const targetCreeps = 8;
-    const needCount = Math.min(targetCreeps - creepCount, 3);
+    const needCount = Math.min(targetCreeps - creepCount, 2);
     if (needCount > 0 && avail >= 200) {
+        let bodySize = 'small';
+        if (avail >= 800) bodySize = 'large';
+        else if (avail >= 400) bodySize = 'medium';
+
         for (let i = 0; i < needCount; i++) {
             taskboard.strategy.needCreeps(room.name, {
                 model: 'CommonI', count: 1,
                 priority: 'harvest',
-                data: { bodySize: 'small', urgent: true, emergencyMode: true }
+                data: { bodySize: bodySize, urgent: true, emergencyMode: true }
             });
         }
     }

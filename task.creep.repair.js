@@ -38,27 +38,31 @@ const taskRepair = {
         }
 
         if (creep.memory.working) {
-            // 执行维修 (寻找受损建筑)
-            const target = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+            // 执行维修：普通建筑优先，墙/堡垒放最后（因为墙上限3亿无底洞）
+            const damaged = creep.room.find(FIND_STRUCTURES, {
                 filter: (s) => s.hits < s.hitsMax && s.structureType !== STRUCTURE_WALL && s.structureType !== STRUCTURE_RAMPART
             });
-            if (target) {
+            const walls = creep.room.find(FIND_STRUCTURES, {
+                filter: (s) => (s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART) && s.hits < 1000000
+            });
+
+            // 普通建筑按血量从低到修（最惨的先修）
+            if (damaged.length > 0) {
+                damaged.sort((a, b) => a.hits - b.hits);
+                const target = damaged[0];
                 if (creep.repair(target) === ERR_NOT_IN_RANGE) {
                     creep.moveTo(target, { visualizePathStyle: { stroke: '#ffffff' } });
                 }
-            } else {
-                // 如果没有需要维修的（非墙），尝试维修墙/刷墙，或者临时建造
-                const wall = creep.pos.findClosestByPath(FIND_STRUCTURES, {
-                    filter: (s) => (s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART) && s.hits < 1000000
-                });
-                if (wall) {
-                    if (creep.repair(wall) === ERR_NOT_IN_RANGE) {
-                        creep.moveTo(wall, { visualizePathStyle: { stroke: '#ffffff' } });
-                    }
-                } else {
-                    // 完全没有可修复的建筑，任务结束
-                    taskHelper.completeTask(creep);
+            } else if (walls.length > 0) {
+                // 没有普通建筑需要修了，才修墙（也按血量从低到高）
+                walls.sort((a, b) => a.hits - b.hits);
+                const wall = walls[0];
+                if (creep.repair(wall) === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(wall, { visualizePathStyle: { stroke: '#ffffff' } });
                 }
+            } else {
+                // 完全没有可修复的建筑，任务结束
+                taskHelper.completeTask(creep);
             }
         } else {
             // 从指定目标获取能量

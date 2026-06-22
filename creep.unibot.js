@@ -11,69 +11,61 @@ const unibot = {
      */
     run: function(creep) {
         const model = creep.memory.model;
-        if (!model) return;
+
+        // 如果已经有任务了，不重复分配
+        if (creep.memory.taskType) return;
 
         // 优先在生成房间或当前房间寻找任务
         const roomName = creep.memory.spawnRoom || creep.room.name;
-        
-        // 如果已经有任务了，调度器本不该分发给 unibot，但这里做个兜底
-        if (creep.memory.taskType) return;
 
         // 获取该房间的所有 Creeps 任务
-        if (!Memory.Taskboard || !Memory.Taskboard.Task || !Memory.Taskboard.Task.Creeps || !Memory.Taskboard.Task.Creeps[roomName]) {
-            return;
+        let tasks = [];
+        if (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task.Creeps && Memory.Taskboard.Task.Creeps[roomName]) {
+            const raw = Memory.Taskboard.Task.Creeps[roomName];
+            if (Array.isArray(raw)) tasks = raw;
         }
 
-        const tasks = Memory.Taskboard.Task.Creeps[roomName];
-        if (!Array.isArray(tasks)) return;
+        // 有model时尝试接单
+        if (model) {
+            const priorityList = this._getPriorityList(model);
+            if (priorityList && tasks.length > 0) {
+                let bestTask = null;
+                let bestTaskIndex = -1;
+                let bestPriorityIndex = Infinity;
 
-        // 获取该模型对应的任务优先级列表
-        const priorityList = this._getPriorityList(model);
-        if (!priorityList) return;
+                for (let i = 0; i < tasks.length; i++) {
+                    const task = tasks[i];
+                    if (task.takenBy) continue;
+                    if (!this._canAcceptTask(model, task.type)) continue;
+                    const priorityIndex = priorityList.indexOf(task.type);
+                    if (priorityIndex === -1) continue;
+                    if (priorityIndex < bestPriorityIndex) {
+                        bestPriorityIndex = priorityIndex;
+                        bestTask = task;
+                        bestTaskIndex = i;
+                    } else if (priorityIndex === bestPriorityIndex) {
+                        if (bestTask && task.createdTime < bestTask.createdTime) {
+                            bestTask = task;
+                            bestTaskIndex = i;
+                        }
+                    }
+                }
 
-        // 寻找符合条件的任务
-        let bestTask = null;
-        let bestTaskIndex = -1;
-        let bestPriorityIndex = Infinity;
-
-        for (let i = 0; i < tasks.length; i++) {
-            const task = tasks[i];
-            
-            // 任务已被领取，跳过
-            if (task.takenBy) continue;
-
-            // 检查模型是否允许接收该任务
-            if (!this._canAcceptTask(model, task.type)) continue;
-
-            // 获取该任务在优先级列表中的位置
-            const priorityIndex = priorityList.indexOf(task.type);
-            if (priorityIndex === -1) continue;
-
-            // 如果找到优先级更高的任务，或者优先级相同但创建时间更早的任务
-            if (priorityIndex < bestPriorityIndex) {
-                bestPriorityIndex = priorityIndex;
-                bestTask = task;
-                bestTaskIndex = i;
-            } else if (priorityIndex === bestPriorityIndex) {
-                if (bestTask && task.createdTime < bestTask.createdTime) {
-                    bestTask = task;
-                    bestTaskIndex = i;
+                if (bestTask) {
+                    this._assignTask(creep, bestTask, roomName, bestTaskIndex);
+                    return;
                 }
             }
         }
 
-        // 领取任务
-        if (bestTask) {
-            this._assignTask(creep, bestTask, roomName, bestTaskIndex);
-            return;
-        }
-
-        // 无任务可接：尝试走到spawn回收自己（减少多余creep）
+        // ====== 最终兜底：无任务可接 → 走到spawn回收 ======
+        // 不管是没model、没任务数据、还是任务全被抢光了，都走这里
         const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
         if (spawn) {
             if (creep.pos.isEqualTo(spawn.pos)) {
                 const res = spawn.recycleCreep(creep);
                 if (res === OK) console.log("[" + creep.room.name + "] ♻️ 回收: " + creep.name);
+                else if (res !== ERR_BUSY) console.log("[" + creep.room.name + "] ♻️ 回收失败: " + res + " (Creep: " + creep.name + ")");
             } else {
                 creep.moveTo(spawn, { visualizePathStyle: { stroke: '#ff0000' } });
             }

@@ -448,6 +448,9 @@ const APTaskhandler = {
             if (!room.controller || !room.controller.my) continue;
 
             const hasLayout = !!room.memory.layoutType;
+
+            // 【紧急模式】策略层已接管，Path B完全跳过避免双重spawn
+            if (room.memory._isEmergencyMode) continue;
             
             const needs = [];
             
