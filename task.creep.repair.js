@@ -87,6 +87,10 @@ const taskRepair = {
 
         if (result === ERR_NOT_IN_RANGE) {
             creep.moveTo(target, { visualizePathStyle: { stroke: '#ffaa00' } });
+        } else if (result !== OK) {
+            // 能量来源无效，切换为autoAssign重试
+            console.log("[Repair] ❌ 无法获取能量: " + result + " (Creep: " + creep.name + ")，切换autoAssign");
+            creep.memory.taskData = { autoAssign: true };
         }
     },
 

@@ -7,7 +7,7 @@ const DevelopV1_L3 = {
     CONFIG: {
         REFRESH_INTERVAL: 50,
         CREEP_CONFIG: {
-            CommonI: { minCount: 5, maxCount: 8, bodySize: 'small', priorities: ['harvest','upgrade','build','repair'] }
+            CommonI: { minCount: 5, maxCount: 15, bodySize: 'small', priorities: ['harvest','upgrade','build','repair'] }
         }
     },
 
@@ -42,7 +42,7 @@ const DevelopV1_L3 = {
         const harvestCount = 3;  // 收获者保底3个
         const baseUpgradeCount = 6;
         const buildQuota = Math.floor(baseUpgradeCount / 2);  // 从upgrade拿一半作为建造者必须额度
-        
+
         // 根据是否有工地动态分配upgrade和build的额度
         let upgradeCount, buildCount;
         if (state.constructionSites > 0) {
@@ -59,10 +59,10 @@ const DevelopV1_L3 = {
         if (current < config.minCount) {
             taskboard.strategy.needCreeps(room.name, {
                 model: 'CommonI', count: config.minCount - current,
-                priority: 'harvest', data: { bodySize: config.bodySize, urgent: current < 2, spawnOnly: true }
+                priority: 'harvest', data: { bodySize: config.bodySize, urgent: current < 2 }
             });
         } else if (current < config.maxCount && state.constructionSites > 3) {
-            taskboard.strategy.needCreeps(room.name, { model: 'CommonI', count: 1, priority: 'build', data: { bodySize: config.bodySize, spawnOnly: true } });
+            taskboard.strategy.needCreeps(room.name, { model: 'CommonI', count: 1, priority: 'build', data: { bodySize: config.bodySize } });
         }
 
         // ====== 任务分发：直接写入 Creeps 任务板 ======
@@ -70,6 +70,27 @@ const DevelopV1_L3 = {
         this._ensureCreepTasks(taskboard, room.name, 'upgrade', upgradeCount);
         if (buildCount > 0) {
             this._ensureCreepTasks(taskboard, room.name, 'build', buildCount);
+        }
+
+        // ====== 维修任务：检测受损建筑并发布repair任务 ======
+        const towers = room.find(FIND_MY_STRUCTURES, { filter: s => s.structureType === STRUCTURE_TOWER });
+        const hasTower = towers.length > 0;
+        const repairTaskCount = hasTower ? 1 : 2;
+
+        // 先检测非墙/堡垒的受损建筑（道路、容器、rampart等）
+        const damagedNormal = room.find(FIND_STRUCTURES, {
+            filter: s => s.hits < s.hitsMax &&
+                      s.structureType !== STRUCTURE_WALL &&
+                      s.structureType !== STRUCTURE_RAMPART
+        });
+        // 再检测墙/堡垒（低血量的优先修）
+        const damagedWalls = room.find(FIND_STRUCTURES, {
+            filter: s => (s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART) &&
+                      s.hits < (s.structureType === STRUCTURE_RAMPART ? 10000 : 10000)
+        });
+
+        if (damagedNormal.length > 0 || damagedWalls.length > 0) {
+            this._ensureCreepTasks(taskboard, room.name, 'repair', repairTaskCount);
         }
     },
 

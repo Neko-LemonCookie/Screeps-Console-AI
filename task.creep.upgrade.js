@@ -85,6 +85,12 @@ const taskUpgrade = {
 
         if (result === ERR_NOT_IN_RANGE) {
             creep.moveTo(target, { visualizePathStyle: { stroke: '#ffaa00' } });
+        } else if (result !== OK) {
+            // 能量来源无效（如传了controller等不能采能的对象），清理任务避免卡死
+            console.log("[Upgrade] ❌ 无法从目标获取能量: " + result + " type=" + target.structureType +
+                       " (Creep: " + creep.name + ")，自动切换为autoAssign重试");
+            // 切换为autoAssign让模块自己找正确的能量来源
+            creep.memory.taskData = { autoAssign: true };
         }
     },
 

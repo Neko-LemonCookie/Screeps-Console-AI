@@ -63,7 +63,20 @@ const buildingSpawn = {
             // RCL3以下禁止生成AttackerI
             if (model === 'AttackerI' && rcl < 4) continue;
 
-            if (spawn.room.energyAvailable < taskEnergy) continue;
+            // 【死锁修复】房间无creep时，用实际可用能量替代模板能量
+            // 否则策略层按energyCapacityAvailable(含扩展)算出大身体能量需求，
+            // 但扩展没creep采能永远是空的 → energyAvailable永远不够 → 永久死锁
+            const roomCreepCount = spawn.room.find(FIND_MY_CREEPS).length;
+            let effectiveEnergy = taskEnergy;
+            if (roomCreepCount === 0) {
+                effectiveEnergy = Math.min(taskEnergy, spawn.room.energyAvailable);
+                // 至少保证最小体能造出来（WORK+CARRY+MOVE=200）
+                if (effectiveEnergy < 200 && spawn.room.energyAvailable >= 200) {
+                    effectiveEnergy = spawn.room.energyAvailable;
+                }
+            }
+
+            if (spawn.room.energyAvailable < effectiveEnergy) continue;
 
             const pIndex = priority.indexOf(model);
             const currentPriority = pIndex === -1 ? 99 : pIndex;
@@ -72,7 +85,7 @@ const buildingSpawn = {
                 minPriorityIndex = currentPriority;
                 bestTask = task;
                 bestTaskIndex = i;
-                bestTaskEnergy = taskEnergy;
+                bestTaskEnergy = effectiveEnergy;
             } else if (currentPriority === minPriorityIndex) {
                 // 如果同一类型有多个单，接创建时间最早的那一个
                 if (bestTask && task.createdTime < bestTask.createdTime) {

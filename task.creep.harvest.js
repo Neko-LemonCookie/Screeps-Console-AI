@@ -325,7 +325,9 @@ const taskHarvest = {
                 if (newTask2) {
                     newTask2.takenBy = creep.name;
                     creep.memory.taskType = 'upgrade';
-                    creep.memory.taskData = { targetId: creep.room.controller.id };
+                    // upgrade任务的targetId是能量来源（source/storage/container），不是控制器
+                    // 控制器由upgrade模块内部自动获取creep.room.controller
+                    creep.memory.taskData = { autoAssign: true };
                     creep.memory.working = undefined;
                     creep.say('⬆️ 改升级');
                 }

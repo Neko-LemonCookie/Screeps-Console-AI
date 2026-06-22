@@ -119,7 +119,7 @@ const APTaskhandler = {
 
         // 【根因修复】硬上限安全网：无论策略层传什么差值，超过硬上限一律不造
         // 防止策略层异常/延迟/tick间状态不一致导致超额
-        const HARD_CAPS = { CommonI: 12, CarrierI: 8, AttackerI: 5, ClaimerI: 3 };
+        const HARD_CAPS = { CommonI: 19, CarrierI: 8, AttackerI: 5, ClaimerI: 3 };
         if (currentCount >= (HARD_CAPS[model] || 10)) {
             if (Game.time % 200 === 0) {
                 console.log("[TaskHandler] 🛑 " + model + "已达硬上限(" + (HARD_CAPS[model] || 10) +
@@ -148,7 +148,9 @@ const APTaskhandler = {
         // 用房间实际能量容量计算模板能量值
         const adapter = require('adapter.wasm_spawncreep');
         const roomObj = Game.rooms[roomName];
-        const roomEnergyCap = roomObj ? roomObj.energyCapacityAvailable : 300;
+        // 【紧急模式】无creep时用实际可用能量而非容量上限，避免死锁
+        const isEmergency = roomObj && roomObj.memory._emergencyMode;
+        const roomEnergyCap = roomObj ? (isEmergency ? roomObj.energyAvailable : roomObj.energyCapacityAvailable) : 300;
         var energy;
         switch (model) {
             case 'CommonI': energy = adapter.calcBodyCost(adapter.getCommonIBody(roomEnergyCap)); break;
@@ -537,7 +539,20 @@ const APTaskhandler = {
                 }
             }
             
-            // 5. 忽略 sign 和 boost 任务
+            // 5. 【紧急维修】检测血量<10%的建筑，发布高优先级repair任务（只发任务不发spawn）
+            const criticalDamaged = room.find(FIND_STRUCTURES, {
+                filter: s => s.hits > 0 && s.hits < s.hitsMax * 0.1
+            });
+            if (criticalDamaged.length > 0) {
+                // 检查是否已有紧急repair任务，避免重复发布
+                const existingRepairCount = tasks.filter(t => t.type === 'repair' && !t.takenBy).length;
+                const toAdd = Math.max(0, 2 - existingRepairCount);
+                for (let k = 0; k < toAdd; k++) {
+                    needs.push({ type: 'repair', priority: 1 }); // 最高优先级，仅次于attack
+                }
+            }
+            
+            // 6. 忽略 sign 和 boost 任务
             // sign: 不生成 creep
             // boost: 临时任务，不为此生成 creep
             
@@ -546,7 +561,7 @@ const APTaskhandler = {
 
             // 【根因修复】per-model 硬上限预算：Path B 只能在策略层没填满的额度内弹性补足
             // 统计当前各型号的 creep 数量（含正在孵化的 spawn 任务）
-            const MODEL_CAPS = { CommonI: 12, CarrierI: 8, AttackerI: 5, ClaimerI: 3 };
+            const MODEL_CAPS = { CommonI: 19, CarrierI: 8, AttackerI: 5, ClaimerI: 3 };
             const modelCounts = { CommonI: 0, CarrierI: 0, AttackerI: 0, ClaimerI: 0 };
 
             // 统计场上的 creep

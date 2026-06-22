@@ -54,6 +54,35 @@ const DevelopV1_Max = {
                 });
             }
         }
+
+        // ====== 发布 Creeps 任务板（让creep出生后有事做）======
+        const curCommon = (state.creeps.CommonI || 0);
+        this._ensureTasks(taskboard, room.name, 'harvest', Math.min(curCommon, 2));
+        this._ensureTasks(taskboard, room.name, 'upgrade', Math.max(0, curCommon - 1));
+        this._ensureRepairTasks(taskboard, room);
+    },
+
+    _ensureTasks: function(tb, roomName, type, n) {
+        var existing = tb.getTasks(roomName, 'Creeps'); var cnt = 0;
+        for (var i = 0; i < existing.length; i++) { if (existing[i].type === type) cnt++; }
+        for (var j = cnt; j < n; j++) { tb._addTask('Creeps', roomName, type, { autoAssign: true }); }
+    },
+
+    _ensureRepairTasks: function(tb, room) {
+        var towers = room.find(FIND_MY_STRUCTURES, { filter: s => s.structureType === STRUCTURE_TOWER });
+        var count = towers.length > 0 ? 1 : 2;
+        var damagedNormal = room.find(FIND_STRUCTURES, {
+            filter: s => s.hits < s.hitsMax && s.structureType !== STRUCTURE_WALL && s.structureType !== STRUCTURE_RAMPART
+        });
+        var damagedWalls = room.find(FIND_STRUCTURES, {
+            filter: s => (s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART) && s.hits < 10000
+        });
+        if (damagedNormal.length > 0 || damagedWalls.length > 0) {
+            var existing = tb.getTasks(room.name, 'Creeps'); var cur = 0;
+            for (var i = 0; i < existing.length; i++) { if (existing[i].type === 'repair') cur++; }
+            var toAdd = count - cur;
+            for (var j = 0; j < toAdd; j++) { tb._addTask('Creeps', room.name, 'repair', { autoAssign: true }); }
+        }
     },
 
     _getDefaultPriority: function(model) { return { CommonI:'harvest', CarrierI:'carry', AttackerI:'attack', ClaimerI:'claim' }[model] || 'harvest'; },
