@@ -39,15 +39,11 @@ function checkEmergencyMode(room) {
     const taskboard = require('lib.AP.taskboard');
     room.memory._isEmergencyMode = true;
 
+    // 清除Strategy层旧任务（每5tick一次，避免累积）
+    // 注意：不清Buildings的spawn任务！spawn任务由building.spawn按能量自然消费
     if (Game.time % 5 === 0) {
-        if (Memory.Taskboard && Memory.Taskboard.Task) {
-            if (Memory.Taskboard.Task.Strategy && Memory.Taskboard.Task.Strategy[room.name]) {
-                Memory.Taskboard.Task.Strategy[room.name] = [];
-            }
-            if (Memory.Taskboard.Task.Buildings && Memory.Taskboard.Task.Buildings[room.name]) {
-                Memory.Taskboard.Task.Buildings[room.name] =
-                    (Memory.Taskboard.Task.Buildings[room.name] || []).filter(t => t.type !== 'spawn');
-            }
+        if (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task.Strategy && Memory.Taskboard.Task.Strategy[room.name]) {
+            Memory.Taskboard.Task.Strategy[room.name] = [];
         }
     }
 

@@ -45,7 +45,7 @@ const DevelopV1_L7 = {
         if (curCommon >= configs.CommonI.maxCount) return;
         // CommonI
         const commonCfg = configs.CommonI;
-        if (curCommon < commonCfg.minCount) {
+        if (curCommon < commonCfg.minCount && !this._hasPendingNeed(room.name, 'CommonI')) {
             taskboard.strategy.needCreeps(room.name, {
                 model: 'CommonI', count: commonCfg.minCount - curCommon, priority: 'harvest',
                 data: { bodySize: commonCfg.bodySize, enableBoost: commonCfg.enableBoost, boostResource: commonCfg.boostResource }
@@ -66,6 +66,14 @@ const DevelopV1_L7 = {
                 data: { bodySize: carrierCfg.bodySize, enableBoost: carrierCfg.enableBoost, boostResource: carrierCfg.boostResource }
             });
         }
+    },
+
+    _hasPendingNeed: function(roomName, model) {
+        if (!Memory.Taskboard || !Memory.Taskboard.Task || !Memory.Taskboard.Task.Strategy) return false;
+        var tasks = Memory.Taskboard.Task.Strategy[roomName];
+        if (!Array.isArray(tasks)) return false;
+        for (var i = 0; i < tasks.length; i++) { if (tasks[i].type === 'needCreeps' && tasks[i].data && tasks[i].data.model === model) return true; }
+        return false;
     },
 
     _ensureTasks: function(tb, roomName, type, n) {

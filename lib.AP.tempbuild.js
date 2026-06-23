@@ -179,6 +179,84 @@ const libAPTempbuild = {
     },
 
     /**
+     * 自动选择布局类型：优先 9x9，放不下则降级为 5x5
+     * 以已有 spawn 为锚点，检查完整模板(RCL1-8)是否都能放下
+     * @private
+     */
+    _selectLayoutType: function(roomName) {
+        const room = Game.rooms[roomName];
+        if (!room) return '5x5';
+
+        // 先试 9x9：以已有 spawn 为锚点反推中心
+        const spawnCenter9x9 = this._calcCenterFromSpawn(roomName, 9);
+        if (spawnCenter9x9 && this._canFitTemplate(roomName, spawnCenter9x9, this.template9x9)) {
+            return '9x9';
+        }
+
+        // 9x9 放不下，降级 5x5（5x5 几乎任何位置都放得下）
+        console.log("[TempBuild] ⚠️ " + roomName + " 9x9放不下，降级5x5");
+        return '5x5';
+    },
+
+    /**
+     * 检查指定中心和模板的所有建筑位置是否可建造
+     * @private
+     */
+    _canFitTemplate: function(roomName, center, template) {
+        const terrain = Game.map.getRoomTerrain(roomName);
+        let wallCount = 0;
+        const WALL_TOLERANCE = 3; // 允许最多3个位置撞墙（会被偏移容错）
+
+        for (const level in template) {
+            const builds = template[level];
+            if (!builds) continue;
+            for (const b of builds) {
+                const x = center.x + b.x;
+                const y = center.y + b.y;
+
+                // 超出房间范围 → 肯定放不下
+                if (x < 0 || x > 49 || y < 0 || y > 49) return false;
+
+                // 自然墙 → 计数，超过容忍度就放弃
+                if (terrain.get(x, y) === TERRAIN_MASK_WALL) {
+                    wallCount++;
+                    if (wallCount > WALL_TOLERANCE) return false;
+                }
+            }
+        }
+        return true;
+    },
+
+    /**
+     * 从已有 spawn 反推城市中心坐标
+     * @private
+     */
+    _calcCenterFromSpawn: function(roomName, size) {
+        const room = Game.rooms[roomName];
+        if (!room) return null;
+        const spawns = room.find(FIND_MY_SPAWNS);
+        if (spawns.length === 0) return null;
+
+        const spawn = spawns[0];
+        let centerX, centerY;
+        if (size === 5) {
+            centerX = spawn.pos.x - 2;
+            centerY = spawn.pos.y + 2;
+        } else {
+            centerX = spawn.pos.x;      // 9x9: spawn at (0,-1)
+            centerY = spawn.pos.y + 1;
+        }
+
+        // 中心必须在安全范围内（给模板留够空间）
+        const margin = Math.floor(size / 2) + 1;
+        if (centerX >= margin && centerX <= 49 - margin &&
+            centerY >= margin && centerY <= 49 - margin) {
+            return { x: centerX, y: centerY };
+        }
+        return null;
+    },
+
+    /**
      * 寻找城市中心
      */
     findCityCenter: function(roomName, size) {
@@ -358,9 +436,10 @@ const libAPTempbuild = {
         const room = Game.rooms[roomName];
         if (!room) return;
 
-        // 默认所有房间都使用 9x9 核心房间布局
+        // 自动选择布局类型：优先 9x9，放不下则降级为 5x5
         if (!room.memory.layoutType) {
-            room.memory.layoutType = '9x9';
+            room.memory.layoutType = this._selectLayoutType(roomName);
+            console.log("[TempBuild] 📐 布局选定: " + roomName + " → " + room.memory.layoutType);
         }
 
         const isCoreRoom = room.memory.layoutType === '9x9';
@@ -430,6 +509,7 @@ const libAPTempbuild = {
 
     /**
      * 运行城市外围生成逻辑 (容器、道路、墙)
+     * 按RCL分层：RCL 2-3 只建防御墙保命，RCL 4+ 补齐容器和路
      */
     runOuterStructures: function(roomName) {
         const room = Game.rooms[roomName];
@@ -437,14 +517,17 @@ const libAPTempbuild = {
         const center = room.memory.cityCenter;
         const rcl = room.controller.level;
 
-        // 1. 容器
+        // 【保命优先】RCL 2+ 就建出口防御墙（WALL + Rampart 门）
+        if (this._placeDefenses(room, center)) return true;
+
+        // 以下需要 RCL 4+
+        if (rcl < 4) return false;
+
+        // 容器
         if (this._placeContainers(room, center)) return true;
 
-        // 2. 道路
+        // 道路
         if (this._placePaths(room, center)) return true;
-
-        // 3. 围墙
-        if (this._placeDefenses(room, center)) return true;
 
         return false;
     },

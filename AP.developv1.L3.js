@@ -55,13 +55,14 @@ const DevelopV1_L3 = {
             upgradeCount = baseUpgradeCount;
         }
 
-        // ====== Spawn 需求（只在缺人时创建）======
-        if (current < config.minCount) {
+        // ====== Spawn 需求（只在缺人时创建，去重防累积）======
+        // 检查是否已有同模型的pending请求，避免每2tick重复追加
+        if (current < config.minCount && !this._hasPendingNeed(room.name, 'CommonI')) {
             taskboard.strategy.needCreeps(room.name, {
                 model: 'CommonI', count: config.minCount - current,
                 priority: 'harvest', data: { bodySize: config.bodySize, urgent: current < 2 }
             });
-        } else if (current < config.maxCount && state.constructionSites > 3) {
+        } else if (current < config.maxCount && state.constructionSites > 3 && !this._hasPendingNeed(room.name, 'CommonI')) {
             taskboard.strategy.needCreeps(room.name, { model: 'CommonI', count: 1, priority: 'build', data: { bodySize: config.bodySize } });
         }
 
@@ -92,6 +93,17 @@ const DevelopV1_L3 = {
         if (damagedNormal.length > 0 || damagedWalls.length > 0) {
             this._ensureCreepTasks(taskboard, room.name, 'repair', repairTaskCount);
         }
+    },
+
+    _hasPendingNeed: function(roomName, model) {
+        // 检查Strategy队列中是否已有该模型的needCreeps请求（防重复累积）
+        if (!Memory.Taskboard || !Memory.Taskboard.Task || !Memory.Taskboard.Task.Strategy) return false;
+        const tasks = Memory.Taskboard.Task.Strategy[roomName];
+        if (!Array.isArray(tasks)) return false;
+        for (var i = 0; i < tasks.length; i++) {
+            if (tasks[i].type === 'needCreeps' && tasks[i].data && tasks[i].data.model === model) return true;
+        }
+        return false;
     },
 
     _ensureCreepTasks: function(taskboard, roomName, taskType, targetCount) {

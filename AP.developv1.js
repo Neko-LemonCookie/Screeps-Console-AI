@@ -47,16 +47,12 @@ function checkEmergencyMode(room) {
     // 标记紧急状态，让taskhandler的Path B跳过
     room.memory._isEmergencyMode = true;
 
-    // 清除旧任务（每5tick一次，避免每tick重置）
+    // 清除Strategy层旧任务（每5tick一次，避免累积）
+    // 注意：不清Buildings的spawn任务！spawn任务由building.spawn按能量自然消费，
+    //       强制清掉会导致低能量时任务反复创建又删除，永远造不出人
     if (Game.time % 5 === 0) {
-        if (Memory.Taskboard && Memory.Taskboard.Task) {
-            if (Memory.Taskboard.Task.Strategy && Memory.Taskboard.Task.Strategy[room.name]) {
-                Memory.Taskboard.Task.Strategy[room.name] = [];
-            }
-            if (Memory.Taskboard.Task.Buildings && Memory.Taskboard.Task.Buildings[room.name]) {
-                Memory.Taskboard.Task.Buildings[room.name] =
-                    (Memory.Taskboard.Task.Buildings[room.name] || []).filter(t => t.type !== 'spawn');
-            }
+        if (Memory.Taskboard && Memory.Taskboard.Task && Memory.Taskboard.Task.Strategy && Memory.Taskboard.Task.Strategy[room.name]) {
+            Memory.Taskboard.Task.Strategy[room.name] = [];
         }
     }
 

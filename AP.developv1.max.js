@@ -47,7 +47,7 @@ const DevelopV1_Max = {
             const current = (state.creeps[model] || 0);
             // 【根因修复】已达上限的型号跳过
             if (current >= cfg.maxCount) continue;
-            if (current < cfg.minCount) {
+            if (current < cfg.minCount && !this._hasPendingNeed(room.name, model)) {
                 taskboard.strategy.needCreeps(room.name, {
                     model: model, count: cfg.minCount - current,
                     priority: this._getDefaultPriority(model), data: { bodySize: cfg.bodySize, enableBoost: cfg.enableBoost }
@@ -60,6 +60,14 @@ const DevelopV1_Max = {
         this._ensureTasks(taskboard, room.name, 'harvest', Math.min(curCommon, 2));
         this._ensureTasks(taskboard, room.name, 'upgrade', Math.max(0, curCommon - 1));
         this._ensureRepairTasks(taskboard, room);
+    },
+
+    _hasPendingNeed: function(roomName, model) {
+        if (!Memory.Taskboard || !Memory.Taskboard.Task || !Memory.Taskboard.Task.Strategy) return false;
+        var tasks = Memory.Taskboard.Task.Strategy[roomName];
+        if (!Array.isArray(tasks)) return false;
+        for (var i = 0; i < tasks.length; i++) { if (tasks[i].type === 'needCreeps' && tasks[i].data && tasks[i].data.model === model) return true; }
+        return false;
     },
 
     _ensureTasks: function(tb, roomName, type, n) {

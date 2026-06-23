@@ -38,6 +38,27 @@ module.exports = {
             const taskType = creep.memory.taskType;
 
             if (taskType) {
+                // 【卡死检测】如果creep在同一位置、同一working状态超过200tick没变化，强制清掉任务
+                const posKey = creep.pos.x + ',' + creep.pos.y + ',' + creep.room.name;
+                const working = !!creep.memory.working;
+                if (creep.memory._lastPos === posKey && creep.memory._lastWorking === working) {
+                    creep.memory._idleTicks = (creep.memory._idleTicks || 0) + 1;
+                    if (creep.memory._idleTicks > 200) {
+                        console.log("[Dispatcher] ⚠️ " + creep.name + " 卡死(" + taskType + ") " +
+                                   creep.memory._idleTicks + "tick未移动，强制送回收");
+                        // 清除所有任务状态
+                        const taskHelper = require('lib.AP.taskHelper');
+                        taskHelper.completeTask(creep);
+                        creep.memory._idleTicks = 0;
+                        delete creep.memory._lastPos;
+                        delete creep.memory._lastWorking;
+                    }
+                } else {
+                    creep.memory._idleTicks = 0;
+                    creep.memory._lastPos = posKey;
+                    creep.memory._lastWorking = working;
+                }
+
                 // 如果定义了任务类型，则尝试分发
                 const taskModule = taskMap[taskType];
                 if (taskModule && typeof taskModule.run === 'function') {

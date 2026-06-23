@@ -29,7 +29,9 @@ const APAutobuild = {
 
         if (tempbuild.runCityCenter(room.name)) return;
 
-        if (rcl >= 4 && !room.memory.autobuild.outerTriggered) {
+        // 外围建造（RCL 2+ 就开始建防御墙，RCL 4+ 补容器和路）
+        // runOuterStructures 内部已按 RCL 分层，这里不需要额外判断
+        if (!room.memory.autobuild.outerTriggered) {
             if (tempbuild.runOuterStructures(room.name)) {
             } else {
                 room.memory.autobuild.outerTriggered = true;

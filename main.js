@@ -3,8 +3,8 @@
  */
 const modules = require('module.references');
 
-const ENABLE_MARKET = true;   // 市场默认开启（新世界模式需要首单启动资金）
-const DEBUG_LOG = false;      // 详细日志开关（生产环境关闭以节省CPU）
+const ENABLE_MARKET = false;   // 市场关闭（调试阶段）
+const DEBUG_LOG = true;        // 详细日志开启（排查问题）
 
 module.exports.loop = function () {
     var step = 'init';

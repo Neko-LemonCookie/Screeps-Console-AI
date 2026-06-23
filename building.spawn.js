@@ -30,6 +30,30 @@ const buildingSpawn = {
         const spawnTasks = tasks.filter(t => t.type === 'spawn' && !t.takenBy);
         if (spawnTasks.length === 0) return;
 
+        // 【绝对硬上限】最后防线：不管队列里有多少任务，房间creep总数（含孵化中）不超过上限
+        const ABSOLUTE_CAPS = { CommonI: 20, CarrierI: 10, AttackerI: 6, ClaimerI: 4 };
+        const roomCreeps = spawn.room.find(FIND_MY_CREEPS);
+        const spawningCount = roomCreeps.filter(c => c.spawning).length;
+        const activeCount = roomCreeps.length - spawningCount;
+
+        // 按型号统计
+        const modelCounts = { CommonI: 0, CarrierI: 0, AttackerI: 0, ClaimerI: 0 };
+        for (const c of roomCreeps) {
+            if (!c.spawning && c.memory.model && modelCounts[c.memory.model] !== undefined) {
+                modelCounts[c.memory.model]++;
+            }
+        }
+        // 加上正在孵化的（从spawn任务的data中获取）
+        for (const st of tasks) {
+            if (st.type === 'spawn' && st.takenBy) {
+                const m = st.data && st.data.model;
+                if (m && modelCounts[m] !== undefined) modelCounts[m]++;
+            }
+        }
+
+        // 总数绝对上限：活跃+孵化中不超过30，总数不超过35
+        if (roomCreeps.length >= 35) return;
+
         // 2. 接单顺序：攻击型(AttackerI) > 通用型(CommonI) > 搬运型(CarrierI) > 其他(ClaimerI)
         const priority = ['AttackerI', 'CommonI', 'CarrierI', 'ClaimerI'];
         
@@ -63,20 +87,10 @@ const buildingSpawn = {
             // RCL3以下禁止生成AttackerI
             if (model === 'AttackerI' && rcl < 4) continue;
 
-            // 【死锁修复】房间无creep时，用实际可用能量替代模板能量
-            // 否则策略层按energyCapacityAvailable(含扩展)算出大身体能量需求，
-            // 但扩展没creep采能永远是空的 → energyAvailable永远不够 → 永久死锁
-            const roomCreepCount = spawn.room.find(FIND_MY_CREEPS).length;
-            let effectiveEnergy = taskEnergy;
-            if (roomCreepCount === 0) {
-                effectiveEnergy = Math.min(taskEnergy, spawn.room.energyAvailable);
-                // 至少保证最小体能造出来（WORK+CARRY+MOVE=200）
-                if (effectiveEnergy < 200 && spawn.room.energyAvailable >= 200) {
-                    effectiveEnergy = spawn.room.energyAvailable;
-                }
-            }
+            // 【绝对硬上限】该型号已达上限，跳过
+            if (modelCounts[model] >= ABSOLUTE_CAPS[model]) continue;
 
-            if (spawn.room.energyAvailable < effectiveEnergy) continue;
+            if (spawn.room.energyAvailable < taskEnergy) continue;
 
             const pIndex = priority.indexOf(model);
             const currentPriority = pIndex === -1 ? 99 : pIndex;
@@ -85,7 +99,7 @@ const buildingSpawn = {
                 minPriorityIndex = currentPriority;
                 bestTask = task;
                 bestTaskIndex = i;
-                bestTaskEnergy = effectiveEnergy;
+                bestTaskEnergy = taskEnergy;
             } else if (currentPriority === minPriorityIndex) {
                 // 如果同一类型有多个单，接创建时间最早的那一个
                 if (bestTask && task.createdTime < bestTask.createdTime) {
